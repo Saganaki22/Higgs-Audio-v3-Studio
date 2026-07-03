@@ -47,6 +47,7 @@ option(ENGINE_ENABLE_OPENMP "Build host code with OpenMP support" ON)
 option(ENGINE_BUILD_EXAMPLES "Build example binaries" OFF)
 option(ENGINE_BUILD_TESTS "Build framework unit tests" OFF)
 option(ENGINE_BUILD_WARMBENCH "Build warmbench helper binaries" OFF)
+option(ENGINE_BUILD_DESKTOP_API "Build the audiocpp_engine shared library for the Tauri desktop app" OFF)
 
 if (ENGINE_ENABLE_CUDA)
     enable_language(CUDA)
@@ -559,4 +560,8 @@ if (ENGINE_BUILD_EXAMPLES)
     )
 
     target_link_libraries(ggml_simple_inference PRIVATE ggml)
+endif()
+
+if (ENGINE_BUILD_DESKTOP_API)
+    add_subdirectory(app/desktop_api)
 endif()

@@ -1,654 +1,521 @@
-# audio.cpp
+# Higgs Audio v3 Studio
 
-`audio.cpp` is a high-performance C++ audio inference framework built on top of `ggml`, designed to make modern local audio models practical, portable, and fast.
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
+![GPU](https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900)
+![UI](https://img.shields.io/badge/UI-Tauri%202%20%2B%20Vite-24C8DB)
+![Backend](https://img.shields.io/badge/backend-Rust%20%2B%20libloading-orange)
+![Engine](https://img.shields.io/badge/engine-C%2B%2B%20DLL%20via%20C%20ABI-00599C)
+![Build](https://img.shields.io/badge/build-MSVC%202022-success)
 
-Tired of juggling a dozen Conda environments, hundreds of Python packages, and dependency conflicts just to try a few audio models? audio.cpp gives those paths a shared native runtime instead.
+Higgs Audio v3 Studio `0.1.0` is a Windows desktop app for running the `audio.cpp`
+Higgs Audio v3 TTS engine in-process. The app does not shell out to a CLI sidecar.
+The Tauri UI calls Rust commands, Rust loads `audiocpp_engine.dll` with `libloading`,
+and the DLL executes the native C++/CUDA inference path through a small C ABI.
 
-> [!IMPORTANT]
-> **CUDA performance headline:** multiple TTS paths already run **1.8x-5.0x faster than their Python reference paths** while cutting end-to-end latency by **45%-80%**.
-> **VibeVoice 1.5B:** generates a **90-minute podcast in 22 minutes** with **10 diffusion steps** and without quantization, runs about **4x faster than real time**, and is **2.8x faster than Python**.
+The goal is simple: a practical desktop workflow for local TTS, voice cloning,
+speech continuation, and multi-speaker generation without making users manage a
+Python environment.
 
-It is built for real end-to-end execution rather than one-off model demos: the same runtime powers TTS, voice cloning, voice conversion, ASR, diarization, VAD, source separation, alignment, codec-style models, and higher-level workflows through a common framework surface.
+## Downloads
 
-Highlights:
+Prebuilt packages are expected to be published from:
 
-- **Parity.** Strong parity tooling against Python reference paths.
-- **Performance.** Performance-focused execution, reusable sessions, and batch-style offline inference. **Optimized for CUDA**.
-- **Portability.** A portable native stack centered on `ggml`, with CLI and server entry points instead of Python-only deployment paths.
-- **Pipelines.** Experimental JSON pipeline support for higher-level multi-step workflows.
-- **Audio Utilities.** Built-in denoise, enhancement, resampling, and STFT/ISTFT utilities for real production-style task paths.
+- GitHub releases: https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases
+- Hugging Face runtime repository: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio
+- Runtime manifest: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/manifest.json
+- Checksums: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/checksums/SHA256SUMS.txt
 
-<p><strong><span style="font-size:1.1em;">The goal of the framework is to provide highly optimized, reusable building blocks for audio-related models, so new model integrations can be brought up faster, shared components can be improved once and benefit many families, and real end-to-end inference paths can stay efficient, maintainable, and portable.</span></strong></p>
+Direct runtime downloads:
 
-## News
+| File | Recommended VRAM | Direct link |
+| --- | --- | --- |
+| Engine DLL | NVIDIA CUDA 13 GPU required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/engines/audiocpp_engine.dll |
+| Higgs Q8_0 recommended | 12 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q8_0/q8_0.gguf |
+| Higgs Q4_K_M | 8 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/q4_k_m.gguf |
+| Higgs BF16 | 20 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-bf16/bf16.gguf |
 
-> [!IMPORTANT]
-> **2026-06-30:** VibeVoice 1.5B is now released in the framework, bringing long-form, multi-speaker dialogue TTS into the normal audio.cpp model surface.
+Recommended user flow:
 
-> [!TIP]
-> **2026-06-30:** More detailed usage documentation is now available in [docs/usage.md](docs/usage.md), covering model setup, CLI usage, server usage, and common workflows.
+1. Download the latest Windows release from GitHub.
+2. Launch `Higgs Audio v3 Studio`.
+3. Click `Download DLL Engine` if the engine is not bundled.
+4. Download or browse to a Higgs model folder.
+5. Click `Load Engine`, then `Load Model`.
+6. Pick a workflow and generate audio.
 
-- **2026-06-26:** The speech intelligence side grew with released Citrinet ASR, MarbleNet VAD, and Sortformer diarization paths.
-- **2026-06-25:** The first release wave landed with TTS, voice cloning, voice conversion, alignment, VAD, codec, and multilingual generation support across Chatterbox, MioCodec, MioTTS, OmniVoice, PocketTTS, Qwen3, SeedVC, Silero VAD, Vevo2, and VoxCPM2.
+<details>
+<summary>Hugging Face repository layout</summary>
 
-## Supported Models
+The Hugging Face repository root should contain `manifest.json` directly at the
+top level. Put it beside `models/`, `engines/`, and `checksums/`:
 
-Current model status in the framework:
-
-- `released`: The model is fully wired into the broader framework surface and ready for normal use.
-- `integration`: The model is end-to-end working and optimized, but not yet fully wired into the broader framework surface. Those models are expected to be added to the broader framework surface gradually over time.
-- `optimization`: The model is end-to-end working, but still needs more optimization work before it should be treated like a released or integration-level path.
-
-| Family | Task | Supported language(s) | Supported variant(s) in this repo | Release status |
-|---|---|---|---|---|
-| **chatterbox** | TTS, voice cloning | ar, da, de, el, en, es, fi, fr, hi, it, ko, ms, nl, no, pl, pt, sv, sw, tr | Chatterbox with 0.5B backbone | **released** |
-| **citrinet_asr** | ASR | en | Citrinet-256 | **released** |
-| **marblenet_vad** | VAD | lang agnostic | MarbleNet VAD | **released** |
-| **miocodec** | audio codec, voice conversion backend | lang agnostic | MioCodec v2, 25 Hz, 44.1 kHz | **released** |
-| **miotts** | TTS, voice cloning | en, ja | MioTTS-1.7B | **released** |
-| **omnivoice** | TTS, voice cloning, voice design | 646+ langs | OmniVoice, Qwen3-0.6B based | **released** |
-| **pocket_tts** | TTS, voice cloning | en, de, it, pt, es | PocketTTS-100M | **released** |
-| **qwen3_asr** | ASR | zh, en, yue, ar, de, fr, es, pt, id, it, ko, ru, th, vi, ja, tr, hi, ms, nl, sv, da, fi, pl, cs, fil, fa, el, ro, hu, mk | Qwen3-ASR-0.6B | **released** |
-| **qwen3_forced_aligner** | forced alignment | zh, yue, en, de, es, fr, it, pt, ru, ko, ja | Qwen3-ForcedAligner-0.6B | **released** |
-| **qwen3_tts** | TTS, voice cloning, voice design | zh, en, fr, de, it, ja, ko, pt, ru, es | Qwen3-TTS-12Hz-0.6B-Base, Qwen3-TTS-12Hz-1.7B-Base, Qwen3-TTS-12Hz-1.7B-CustomVoice, Qwen3-TTS-12Hz-1.7B-VoiceDesign | **released** |
-| **seed_vc** | voice conversion | lang agnostic | SeedVC XLS-R + HiFT, SeedVC Whisper-small + BigVGAN | **released** |
-| **silero_vad** | VAD | lang agnostic | Silero VAD | **released** |
-| **sortformer_diar** | diarization | en | Sortformer-4spk-v1 | **released** |
-| **vevo2** | TTS, singing generation, voice conversion, singing conversion, editing | en, zh | Vevo2 with Qwen2.5-0.5B AR model | **released** |
-| **vibevoice** | TTS, multi-speaker dialogue TTS | en, zh | VibeVoice-1.5B | **released** |
-| **voxcpm2** | TTS, voice cloning, voice design | ar, da, de, el, en, es, fi, fr, he, hi, id, it, ja, km, ko, lo, ms, my, nl, no, pl, pt, ru, sv, sw, th, tl, tr, vi, zh | VoxCPM2-2B, 48 kHz | **released** |
-| ace_step | music generation | 50+ langs | ACE-Step 1.5 with acestep-5Hz-lm-1.7B | integration |
-| audio_flamingo_next | audio understanding, ASR, audio captioning, audio QA | en, multilingual audio understanding | Audio Flamingo Next Instruct, Qwen2-7B based | optimization |
-| demucs | source separation | lang agnostic | HTDemucs, HTDemucs_ft | integration |
-| heartmula | music generation | zh, en, ja, ko, es | HeartMuLa-oss-3B with HeartCodec-oss | integration |
-| higgs_tts | TTS, voice cloning, expressive speech | 100+ languages | Higgs Audio v3 TTS 4B | integration |
-| irodori_tts | TTS, voice cloning, voice design | ja | Irodori-TTS-500M-v3, Irodori-TTS-600M-v3-VoiceDesign | integration |
-| kokoro_tts | TTS | en-us, en-gb | Kokoro-82M | integration |
-| moss_tts | TTS, voice cloning | zh, yue, en, ar, cs, da, nl, fi, fr, de, el, he, hi, hu, it, ja, ko, mk, ms, fa, pl, pt, ro, ru, es, sw, sv, tl, th, tr, vi | MOSS-TTS-Nano-100M | integration |
-| parakeet_tdt | ASR | en, es, fr, de, da, nl, fi, it, pl, pt, ru, bg, cs, el | Parakeet-TDT-0.6B-v3 | integration |
-| roformer | vocal separation | lang agnostic | Mel-Band-Roformer vocal separation variants | integration |
-| stable_audio | music generation, sound generation, audio editing | en | Stable Audio 3 Small Music, Stable Audio 3 Small SFX, Stable Audio 3 Medium | integration |
-| supertonic | TTS | en | Supertonic 3 | integration |
-
-PocketTTS language selection is a model-load option. When the model path points at the PocketTTS root, the loader uses `english` unless you pass `--load-option language=<name>`. Kyutai's normal non-English PocketTTS releases are smaller distilled language models intended for the fast PocketTTS path. The `_24l` variants are larger 24-layer, undistilled preview models that can sound better but are slower. Kyutai currently publishes French only as `french_24l`, not as a normal distilled `french` language directory, so French is not listed as a normal PocketTTS language here.
-
-## Build
-
-### Linux Build
-
-On Linux, use a normal CMake build directory such as `build/`.
-
-For single-config generators, the default build type is `RelWithDebInfo`.
-
-That default configure is a CPU build unless you enable an accelerator backend explicitly.
-
-Use GCC 13 or newer for Linux builds.
-
-Common Linux configure examples:
-
-CPU-only:
-
-```bash
-cmake -S . -B build
+```text
+drbaph/Higgs-Audio-v3-Studio/
+  manifest.json
+  engines/
+    audiocpp_engine.dll
+  models/
+    higgs-q8_0/
+      q8_0.gguf
+    higgs-q4_k_m/
+      q4_k_m.gguf
+    higgs-bf16/
+      bf16.gguf
+  checksums/
+    SHA256SUMS.txt
 ```
 
-CUDA:
+The staged local upload folder currently mirrors that layout at:
 
-```bash
-cmake -S . -B build -DENGINE_ENABLE_CUDA=ON
+```text
+C:\Users\drbaph\Documents\audio.cpp\models\
 ```
 
-Vulkan:
+Upload that folder to the Hugging Face repo root so the runtime links resolve
+under `/resolve/main/...`.
 
-```bash
-cmake -S . -B build -DENGINE_ENABLE_VULKAN=ON
+</details>
+
+## What It Does
+
+- Runs the native `audio.cpp` Higgs Audio v3 engine inside a Tauri desktop app.
+- Supports normal TTS, voice cloning, speech continuation, and multi-speaker workflows.
+- Supports reference voice drag/drop, replacement, waveform previews, and remove buttons.
+- Supports optional Whisper auto-transcription for reference transcripts.
+- Includes a Whisper model selector with direct `whisper.cpp` model downloads.
+- Includes speaker libraries, per-line speaker assignment, draggable line ordering, and speaker-line pauses.
+- Exposes generation controls such as temperature, top-k, top-p, seed mode, max tokens, chunking, emotion, style, speed, pitch, and expressiveness.
+- Exports generated audio as WAV or MP3.
+- Tracks recent generations per mode.
+- Shows NVIDIA hardware telemetry for VRAM, GPU load, power, RAM, and history.
+- Uses default-browser links for GitHub, releases, Whisper model selection, and external downloads.
+
+## Supported Systems
+
+<details>
+<summary>Windows, GPU, and tooling targets</summary>
+
+Primary target:
+
+- Windows 11 x64
+- Tauri 2 / WebView2 desktop runtime
+- Visual Studio 2022 MSVC toolchain for source builds
+- NVIDIA RTX GPU with CUDA 13 support for the prebuilt CUDA engine
+- Current NVIDIA driver compatible with CUDA 13
+- Recommended: RTX 30-series, 40-series, or 50-series GPU with enough VRAM for the selected quantization
+
+Likely compatible:
+
+- Windows 10 x64 with current WebView2 and NVIDIA drivers
+- Other CUDA-capable NVIDIA GPUs if the DLL was built for their CUDA architecture
+
+Not the focus of this desktop package:
+
+- CPU-only generation
+- macOS desktop packaging
+- Linux desktop packaging
+
+</details>
+
+## Architecture
+
+<details>
+<summary>Runtime architecture and source boundaries</summary>
+
+```text
+Tauri Web UI
+  -> Rust command layer
+    -> libloading + Windows DLL search path setup
+      -> audiocpp_engine.dll C API
+        -> audio.cpp C++ runtime
+          -> ggml / CUDA backend
+            -> Higgs Audio v3 TTS, voice clone, continuation
 ```
 
-Build the CLI and server from the configured tree:
+Important boundary:
 
-```bash
-cmake --build build --parallel --target audiocpp_cli --target audiocpp_server
+- UI code lives in `desktop/src`.
+- Rust command glue lives in `desktop/src-tauri/src`.
+- Native C ABI lives in `app/desktop_api/audiocpp_api.h`.
+- Native DLL implementation lives in `app/desktop_api/audiocpp_api.cpp`.
+- Higgs model code lives under `src/models/higgs_tts`.
+
+Long-running inference runs on Rust blocking worker threads so the WebView stays
+responsive while the native engine is generating audio.
+
+</details>
+
+## Runtime Files
+
+<details open>
+<summary>Expected runtime file layout</summary>
+
+The desktop app expects:
+
+```text
+Higgs Audio v3 Studio.exe
+resources/
+  engine/
+    audiocpp_engine.dll
+  higgs-assets/
+    higgs-audio-v3-tts-4b/
+      config/tokenizer assets
+models/
+  higgs-q8_0/
+    q8_0.gguf
+  higgs-q4_k_m/
+    q4_k_m.gguf
+  higgs-bf16/
+    bf16.gguf
+models/whisper/
+  ggml-base.en-q8_0.bin      # optional, used by auto-transcribe
 ```
 
-If you use an environment manager or custom toolchain, activate it before running the commands above.
+For packaged/portable builds, keep the `resources/` folder beside the executable.
+For development, place the engine DLL in `desktop/src-tauri/resources/engine/`.
 
-The optional Linux helper script wraps the same CMake flow and uses aligned build directory names:
+The in-app `Download DLL Engine` button downloads the engine as
+`audiocpp_engine.dll` into the per-user app data engine folder, which avoids
+Windows permission errors when the app is installed under `Program Files`.
+Bundled/portable resources are still checked automatically when present.
 
-- `build/linux-cuda-release`
-- `build/linux-vulkan-release`
-- `build/linux-cpu-release`
+</details>
 
-Examples:
+## Install For Users
 
-```bash
-scripts/build_linux.sh --backend cuda --target audiocpp_cli --target audiocpp_server
-scripts/build_linux.sh --backend vulkan --target audiocpp_cli --target audiocpp_server
-scripts/build_linux.sh --backend cpu --target audiocpp_cli --target audiocpp_server
+<details open>
+<summary>Portable release</summary>
+
+1. Download the portable release package from GitHub Releases.
+2. Put it in a normal writable folder, for example:
+
+   ```text
+   C:\AI\Higgs-Audio-v3-Studio\
+   ```
+
+3. Keep the `resources/` folder beside `Higgs Audio v3 Studio.exe`.
+4. Run `Higgs Audio v3 Studio.exe`.
+5. If the engine is missing, click `Download DLL Engine`.
+6. Use the Model panel to download or browse to a Higgs model.
+7. Load the engine and model.
+
+</details>
+
+<details>
+<summary>Installer</summary>
+
+1. Download the `.exe` or `.msi` installer from GitHub Releases.
+2. Install normally.
+3. Launch the app from the Start Menu.
+4. Download or browse to the engine/model files from inside the app.
+
+</details>
+
+## Model Setup
+
+<details open>
+<summary>Higgs and Whisper model setup</summary>
+
+The model selector expects model folders, not loose files. A good layout is:
+
+```text
+models/
+  higgs-q8_0/
+    q8_0.gguf
+  higgs-q4_k_m/
+    q4_k_m.gguf
+  higgs-bf16/
+    bf16.gguf
 ```
 
-Use `--build-dir <dir>` only when you intentionally want a custom output directory.
+`Higgs Audio v3 Q8_0` is the recommended model in the app. Shared config and
+tokenizer assets can be packaged once with the app under
+`desktop/src-tauri/resources/higgs-assets/higgs-audio-v3-tts-4b/`, so the
+downloaded model folders only need the `.gguf` files.
 
-### Windows Build
+Recommended VRAM:
 
-The recommended native Windows build is command-line only:
+| Model | VRAM |
+| --- | --- |
+| Higgs Q4_K_M | 8 GB |
+| Higgs Q8_0 | 12 GB |
+| Higgs BF16 | 20 GB |
 
-- Visual Studio Build Tools 2022 or newer with the C++ desktop workload
-- MSVC x64 compiler, Windows SDK, CMake, Ninja, and MSVC OpenMP components
-- Official NVIDIA CUDA Toolkit installed under `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\...` for CUDA builds
+Use `Browse...` if a model is somewhere else.
+In-app model downloads use a user-writable folder by default:
 
-Use MSVC `cl.exe` as the compiler. For CUDA builds, `cl.exe` is also used as the CUDA host compiler. Native Windows `nvcc` does not support `clang-cl` as its host compiler, and the Visual Studio IDE is not required.
+```text
+C:\Users\<you>\audiocpp\models\
+```
 
-From PowerShell:
+For Whisper auto-transcription, use the Whisper panel on the left:
+
+1. Select a Whisper preset.
+2. The recommended default is `base.en-q8_0`.
+3. The smaller turbo option `large-v3-turbo-q5_0` is also highlighted.
+4. Click `Download`, or click `Browse...` and select an existing `ggml-*.bin`.
+
+</details>
+
+## Build Requirements
+
+<details>
+<summary>Toolchain requirements</summary>
+
+Known-good Windows build inputs:
+
+| Dependency | Version / Notes |
+| --- | --- |
+| Visual Studio Build Tools | 2022 or newer, MSVC C++ workload |
+| Windows SDK | Installed with Visual Studio Build Tools |
+| CMake | 3.20+ |
+| Ninja | 1.11+ |
+| CUDA Toolkit | CUDA 13.x for the prebuilt-compatible CUDA engine |
+| Rust | Stable MSVC toolchain |
+| Node.js | 20+ recommended |
+| WebView2 | Required by Tauri on Windows |
+
+</details>
+
+## Build Native Engine
+
+<details>
+<summary>Build the C++ CUDA DLL</summary>
+
+From the repository root:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+# Build the desktop DLL for a CUDA release preset.
+.\scripts\build_windows.ps1 `
+  -Preset windows-cuda-release `
+  -Target audiocpp_engine `
+  -Jobs 16
 ```
 
-CPU-only:
+To force CUDA architectures:
 
 ```powershell
-.\scripts\build_windows.ps1 -Preset windows-cpu-release -Target audiocpp_cli
+.\scripts\build_windows.ps1 `
+  -Preset windows-cuda-release `
+  -Target audiocpp_engine `
+  -CudaArchitectures "86;89;120" `
+  -Jobs 16
 ```
 
-From `cmd.exe`:
+Common architecture targets:
 
-```bat
-scripts\build_windows.cmd
+| GPU family | CUDA architecture |
+| --- | --- |
+| RTX 30-series | `86` |
+| RTX 40-series | `89` |
+| RTX 50-series | `120` or `120a-real`, depending on CUDA/toolchain support |
+
+The DLL is written to:
+
+```text
+build/windows-cuda-release/bin/audiocpp_engine.dll
 ```
 
-If GNU Make is available on Windows:
+For development, copy it to:
 
-```bash
-make -f Makefile.windows cpu JOBS=16
-make -f Makefile.windows cuda JOBS=16
+```text
+desktop/src-tauri/resources/engine/audiocpp_engine.dll
 ```
 
-The Windows script configures `build/windows-cuda-release` by default and builds `audiocpp_cli`. CUDA presets enable CUDA, CUDA graphs, OpenMP, Ninja, `/utf-8`, `/EHsc`, MSVC OpenMP SIMD support with `/openmp:experimental`, and the same portable CPU optimization baseline used for the Windows CUDA path. The CPU preset uses the same MSVC/Ninja/OpenMP setup without requiring CUDA. CUDA presets auto-detect the local GPU CUDA architecture when `nvidia-smi` is available.
+For portable release builds, place it beside the final executable.
 
-Useful variants:
+</details>
+
+## Build Desktop App
+
+<details>
+<summary>Build or run the Tauri app</summary>
+
+From the repository root:
 
 ```powershell
-.\scripts\build_windows.ps1 -Target audiocpp_server -Jobs 16
-.\scripts\build_windows.ps1 -Preset windows-cpu-release -Target audiocpp_cli
-.\scripts\build_windows.ps1 -Preset windows-cuda-debug -Target audiocpp_cli
-.\scripts\build_windows.ps1 -ConfigureOnly
-.\scripts\build_windows.ps1 -CudaArchitectures 120a-real
+cd desktop
+npm install
+npm run build:vite
+cd src-tauri
+cargo check
+cd ..
+npm run build
 ```
 
-If multiple Build Tools installations are present, pass the one you want explicitly:
+Fast local app run:
 
 ```powershell
-.\scripts\build_windows.ps1 -VsInstall "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+cd desktop
+npx tauri dev
 ```
 
-The built CLI is written to the selected preset directory:
+Build only the frontend:
 
 ```powershell
-build\windows-cpu-release\bin\audiocpp_cli.exe
-build\windows-cuda-release\bin\audiocpp_cli.exe
+cd desktop
+npm run build:vite
 ```
 
-### Metal Build
+Build the Tauri app without generating installer bundles:
 
-On macOS, use the Metal helper script to build against ggml's Metal backend. It requires Xcode or the Xcode Command Line Tools with the Metal compiler available through `xcrun`.
-
-```bash
-scripts/build_metal.sh --target audiocpp_cli
+```powershell
+cd desktop
+npx tauri build --no-bundle
 ```
 
-The script configures `build/macos-metal-release` by default, enables `ENGINE_ENABLE_METAL=ON`, disables CUDA and Vulkan, embeds the Metal shader library, and builds static libraries plus the requested target.
+Full Tauri build output is under:
 
-Useful variants:
-
-```bash
-scripts/build_metal.sh --target audiocpp_server
-scripts/build_metal.sh --build-type Release --archs arm64 --target audiocpp_cli
-scripts/build_metal.sh --with-tests --target audio_dsp_test
-scripts/build_metal.sh --openmp auto --target audiocpp_cli
+```text
+desktop/src-tauri/target/release/
+desktop/src-tauri/target/release/bundle/
 ```
 
-The built CLI is written to:
+</details>
 
-```bash
-build/macos-metal-release/bin/audiocpp_cli
+## Verification
+
+<details>
+<summary>Local verification checks</summary>
+
+Useful checks:
+
+```powershell
+# Frontend TypeScript + Vite production build
+cd desktop
+npm run build:vite
+
+# Rust command layer
+cd src-tauri
+cargo check
+cd ..\..
+
+# Native DLL target
+.\scripts\build_windows.ps1 -Preset windows-cuda-release -Target audiocpp_engine
 ```
 
-Build options:
+Expected behavior:
 
-| Option | Meaning | Default |
-|---|---|---|
-| `ENGINE_ENABLE_CUDA` | Enable the ggml CUDA backend. Required for `--backend cuda`. | `OFF` |
-| `ENGINE_ENABLE_VULKAN` | Enable the ggml Vulkan backend. Required for `--backend vulkan`. | `OFF` |
-| `ENGINE_ENABLE_METAL` | Enable the ggml Metal backend. Required for `--backend metal`. | `OFF` on most platforms, `ON` on Apple |
-| `ENGINE_ENABLE_LLAMAFILE` | Enable llamafile SGEMM support in ggml CPU builds. | `ON` |
-| `ENGINE_ENABLE_CUDA_GRAPHS` | Enable ggml CUDA graphs support when CUDA is enabled. | `ON` |
-| `ENGINE_ENABLE_OPENMP` | Enable OpenMP for host-side parallel work. | `ON` |
-| `ENGINE_BUILD_EXAMPLES` | Build example binaries. | `OFF` |
-| `ENGINE_BUILD_TESTS` | Build framework unit tests. | `OFF` |
-| `ENGINE_BUILD_WARMBENCH` | Build warmbench helper binaries. | `OFF` |
+- The app opens to the main TTS workflow.
+- `Download DLL Engine` downloads `audiocpp_engine.dll`.
+- `Load Engine` changes the engine chip from unloaded to loaded.
+- `Load Model` enables generation after a valid model folder is selected.
+- Voice clone and multi-speaker workflows require reference audio.
+- Whisper auto-transcription requires a selected `ggml-*.bin` Whisper model.
 
-### Build Type Notes
+</details>
 
-- For single-config generators, the recommended config is `RelWithDebInfo`
-- For multi-config generators, choose the configuration at build time
-- Backend and feature options are independent from build type
+## Troubleshooting
 
-## Usage
+<details>
+<summary>Common issues and fixes</summary>
 
-### CLI
+### `Port 1420 is already in use`
 
-The main CLI binary is:
+Another Vite dev server is already running.
 
-```bash
-build/bin/audiocpp_cli
+Check the port:
+
+```powershell
+Get-NetTCPConnection -LocalPort 1420 -ErrorAction SilentlyContinue |
+  Select-Object LocalAddress,LocalPort,State,OwningProcess
 ```
 
-High-level command shape:
+Stop the old process or run the app after that server exits.
 
-```bash
-audiocpp_cli --task <task> --model <path> [--family <family>] [--backend <backend>] [--mode <mode>] [options]
+### `Engine library not found`
+
+The app could not find `audiocpp_engine.dll`.
+
+Fix one of these:
+
+- Click `Download DLL Engine`.
+- Copy the DLL beside the release executable.
+- In dev, copy it to `desktop/src-tauri/resources/engine/audiocpp_engine.dll`.
+
+### `Load Model` is disabled
+
+Load the engine first, then select a valid model folder.
+
+The app lists folders containing model weights such as `model.gguf` or
+`model.safetensors`. Loose files in the root `models/` folder will not appear as
+full model entries.
+
+### CUDA DLL load errors
+
+Make sure:
+
+- NVIDIA driver is current.
+- CUDA runtime DLLs required by the engine are on `PATH` or bundled beside the executable.
+- The engine DLL was built for your GPU architecture.
+
+### VRAM spikes during generation
+
+Short VRAM spikes can happen during inference. They usually come from temporary
+workspace buffers, KV cache growth, CUDA/ggml scratch allocations, audio codec
+stages, or graph execution setup. A quantized model can still need extra transient
+memory while generating.
+
+If you run out of memory:
+
+- Use a smaller or lower-quantized model.
+- Close other GPU-heavy apps.
+- Reduce max tokens.
+- Disable longform chunking or use smaller chunks.
+- Try a smaller reference clip.
+
+### Whisper auto-transcribe does nothing
+
+Select a Whisper model in the left Whisper panel. The recommended default is
+`base.en-q8_0`. The model file should be a `ggml-*.bin` from `whisper.cpp`.
+
+### Downloads do not start
+
+Check that the URL is a direct Hugging Face `resolve/main/...` URL, not a
+browser `blob/main/...` page.
+
+Good:
+
+```text
+https://huggingface.co/user/repo/resolve/main/path/file.bin
 ```
 
-Core selectors:
+Not good for direct app download:
 
-- `--task vad|asr|diar|sep|gen|tts|clon|vc|s2s|align|vdes|spk|svc`
-- `--model <path>`
-- `--family <name>` optionally narrows model-loader selection when a model path could match more than one family
-- `--backend cpu|cuda|vulkan|metal|best`
-- `--mode offline|streaming`
-
-Common interface options:
-
-- `--load-option key=value` passes model-load options, such as PocketTTS language selection
-- `--session-option key=value` passes session/runtime options, such as backend-specific weight controls
-- `--request-option key=value` passes per-request model options
-- `--config <id>` selects a discovered config asset
-- `--weight <id>` selects a discovered weight asset
-- `--device <n>` selects the backend device
-- `--threads <n>` sets backend and OpenMP worker threads
-
-> [!WARNING]
-> The CLI surface already exposes streaming-oriented arguments and request paths, but framework-wide streaming inference is not generally supported yet. The models should still be treated as offline-only.
-
-Examples:
-
-Text-to-speech:
-
-```bash
-build/bin/audiocpp_cli \
-  --task tts \
-  --family pocket_tts \
-  --model /path/to/model \
-  --backend cuda \
-  --text "audio.cpp is running PocketTTS locally." \
-  --voice-ref assets/resources/sample.wav \
-  --out build/out/pocket_tts.wav
+```text
+https://huggingface.co/user/repo/blob/main/path/file.bin
 ```
 
-PocketTTS with another language and a built-in voice:
+### App links open inside the app instead of browser
 
-```bash
-build/bin/audiocpp_cli \
-  --task tts \
-  --family pocket_tts \
-  --model /path/to/models/pocket-tts \
-  --backend cuda \
-  --load-option language=spanish \
-  --text "Hola, esta es una prueba corta de Pocket TTS." \
-  --voice-id alba \
-  --out build/out/pocket_tts_spanish.wav
+Links should be routed through the Rust `open_external_url` command. If a new
+link is added, wire it through that command instead of using an in-app WebView
+navigation.
+
+</details>
+
+## Project Layout
+
+```text
+app/desktop_api/               Native C ABI used by the Tauri app
+desktop/                       Tauri 2 + Vite frontend
+desktop/src/                   TypeScript UI
+desktop/src-tauri/src/         Rust command layer and DLL loader
+include/                       Public C++ framework headers
+src/models/higgs_tts/          Higgs Audio v3 model implementation
+scripts/build_windows.ps1      Windows CMake/MSVC build helper
+tests/higgs_tts/               Higgs warmbench helpers
 ```
 
-ASR:
+## Upstream And Credits
 
-```bash
-build/bin/audiocpp_cli \
-  --task asr \
-  --family qwen3_asr \
-  --model /path/to/model \
-  --backend cuda \
-  --audio assets/resources/sample_16k.wav
-```
+This desktop app builds on:
 
-Voice conversion:
+- `audio.cpp`, the native C++ audio inference framework in this repository.
+- `ggml`, used by the native backend.
+- `whisper.cpp`, used for optional local transcription.
+- Higgs Audio v3 model work from Boson AI.
+- Tauri 2, Rust, Vite, and TypeScript for the desktop shell.
 
-```bash
-build/bin/audiocpp_cli \
-  --task vc \
-  --family seed_vc \
-  --model /path/to/model \
-  --backend cuda \
-  --audio assets/resources/a.wav \
-  --voice-ref assets/resources/b.wav \
-  --out build/out/seed_vc.wav
-```
-
-Useful CLI features:
-
-- `--help` with `--task` shows task-oriented help
-- `--help` with `--model <path>` and optional `--family <family>` shows model-owned request, session, and load options
-- `--inspect` prints discovered configs, weights, and capabilities
-- `--list-loaders` prints registered model families
-- `--batch-text-file <txt>` runs one offline request per non-empty line
-- `--batch-audio-dir <dir>` runs one offline request per `.wav`
-- `--request-sequence <json>` runs a multi-request offline session
-- `--batch-merge-audio none|concat` controls batch audio merge behavior
-- `--batch-manifest-out <json>` writes a batch output manifest
-- `--pipeline <json>` runs a workflow instead of a raw task
-- `--list-pipelines` prints registered workflows
-- `--workflow-input key=value` overrides pipeline inputs
-- `--log` streams framework logs to stdout
-- `--log-file <path>` streams framework logs to a file in real time
-- `--segments-out`, `--turns-out`, and `--words-out` write structured JSON outputs
-
-### Pipelines
-
-Pipelines are an experimental JSON workflow feature for chaining multiple model and audio-processing steps behind one CLI command. A pipeline can define default inputs, let users override them with `--workflow-input key=value`, split long media into model-sized chunks, merge text or audio outputs back together, write intermediate artifacts under `--out-dir`, and copy the declared `final_audio` to `--out`.
-
-This is the higher-level layer for production-style audio jobs: redubbing, batch cleanup, long-form narration, voice conversion, source-separation workflows, transcription-plus-alignment, and future workflows that combine translation, diarization, denoise, enhancement, or review steps as those model surfaces are wired into the framework.
-
-The included same-language speech redub pipeline transcribes long speech in chunks with Qwen3 ASR, merges the transcript, then regenerates the speech in a target reference voice with Qwen3 TTS. The default test input `assets/resources/speech.wav` is about 418 seconds long and was generated from an 8,091-character speech text, so it exercises long-audio split and merge behavior rather than a short one-shot request:
-
-```bash
-build/bin/audiocpp_cli \
-  --pipeline assets/pipeline/speech_redub.json \
-  --backend cuda \
-  --out-dir build/out/speech_redub_pipeline \
-  --out build/out/speech_redub_pipeline.wav
-```
-
-Override the source speech or target voice without editing the JSON:
-
-```bash
-build/bin/audiocpp_cli \
-  --pipeline assets/pipeline/speech_redub.json \
-  --backend cuda \
-  --workflow-input source_audio=/path/to/speech.wav \
-  --workflow-input target_voice=/path/to/voice.wav \
-  --workflow-input language=English \
-  --out-dir build/out/speech_redub_pipeline \
-  --out build/out/speech_redub_pipeline.wav
-```
-
-### Tools / Model Manager
-
-The repository also ships a model manager at `tools/model_manager.py` for downloading supported model packages into the framework expected `models/` layout.
-
-Dependencies:
-
-- Python 3
-- `torch`
-- `safetensors`
-- `PyYAML`
-- network access to the upstream model sources
-
-The tool supports three main commands:
-
-- `list` shows the available package ids
-- `info` shows the target layout, required files, and install source for one package
-- `install` downloads or converts one package into a models root
-
-Recommended top-level install packages:
-
-`Yes` means Hugging Face has a ready-to-use repo that the framework can download as-is. `No` means the tool must assemble, convert, or post-process files before the framework can use them.
-
-| Package id | Model | HF ready-to-use repo |
-|---|---|---|
-| `ace_step` | ACE-Step 1.5 | No |
-| `chatterbox` | Chatterbox | **Yes** |
-| `citrinet_asr` | Citrinet ASR converted layout | No |
-| `heartmula` | HeartMuLa | No |
-| `higgs_audio_v3_tts_4b` | Higgs Audio v3 TTS 4B | **Yes** |
-| `htdemucs` | HTDemucs | No |
-| `irodori_tts_500m_v3` | Irodori-TTS 500M v3 | No |
-| `irodori_tts_600m_v3_voice_design` | Irodori-TTS 600M v3 VoiceDesign | No |
-| `kokoro_82m_bf16` | Kokoro 82M bf16 | **Yes** |
-| `marblenet_vad` | MarbleNet VAD converted layout | No |
-| `mel_band_roformer` | Mel RoFormer MLX | **Yes** |
-| `miocodec_25hz_44k_v2` | MioCodec 25Hz 44.1kHz v2 | No |
-| `miotts_1_7b` | MioTTS 1.7B | No |
-| `moss_tts` | MOSS TTS Nano 100M | No |
-| `omnivoice` | OmniVoice | **Yes** |
-| `parakeet_tdt_0_6b_v3` | Parakeet TDT 0.6B v3 | **Yes** |
-| `pocket_tts` | PocketTTS | **Yes** |
-| `qwen3_asr_0_6b` | Qwen3 ASR 0.6B | **Yes** |
-| `qwen3_forced_aligner_0_6b` | Qwen3 Forced Aligner 0.6B | **Yes** |
-| `qwen3_tts_0_6b_base` | Qwen3 TTS 12Hz 0.6B Base | **Yes** |
-| `qwen3_tts_1_7b_base` | Qwen3 TTS 12Hz 1.7B Base | **Yes** |
-| `qwen3_tts_1_7b_custom_voice` | Qwen3 TTS 12Hz 1.7B Custom Voice | **Yes** |
-| `qwen3_tts_1_7b_voice_design` | Qwen3 TTS 12Hz 1.7B Voice Design | **Yes** |
-| `seed_vc` | SeedVC-MLX | **Yes** |
-| `sortformer_diar_4spk_v1` | Sortformer diarization 4 speaker v1 | **Yes** |
-| `stable_audio_3_medium` | Stable Audio 3 Medium | **Yes** |
-| `stable_audio_3_small_music` | Stable Audio 3 Small Music | **Yes** |
-| `stable_audio_3_small_sfx` | Stable Audio 3 Small SFX | **Yes** |
-| `supertonic_3` | Supertonic 3 | **Yes** |
-| `vevo2` | Vevo2 | No |
-| `vibevoice_1_5b` | VibeVoice 1.5B | No |
-| `voxcpm2` | VoxCPM2 | No |
-
-> [!WARNING]
-> PocketTTS is hosted in a gated Hugging Face repo, so the model manager needs a Hugging Face token with access to `kyutai/pocket-tts`. It currently downloads only the English model and the built-in `alba` voice.
-
-Examples:
-
-List packages:
-
-```bash
-python3 tools/model_manager.py list
-```
-
-Show one package:
-
-```bash
-python3 tools/model_manager.py info qwen3_tts_1_7b_base
-```
-
-Install one package into the default `models/` directory:
-
-```bash
-python3 tools/model_manager.py install qwen3_tts_1_7b_base
-```
-
-Install into a custom models root:
-
-```bash
-python3 tools/model_manager.py install vevo2 --models-root /path/to/models
-```
-
-Replace an existing installed package:
-
-```bash
-python3 tools/model_manager.py install pocket_tts --overwrite
-```
-
-Some packages are direct snapshots, while others are composite installs or local-file utilities. Use `info` first when you want to inspect the expected target directory, required files, or whether a package needs extra local source inputs such as `--source-file` or `--source-dir`.
-
-Run a local-file utility:
-
-```bash
-python3 tools/model_manager.py info voxcpm2_audiovae
-python3 tools/model_manager.py install voxcpm2_audiovae --source-file models/VoxCPM2/audiovae.pth --models-root models --overwrite
-```
-
-### Server
-
-The server binary is:
-
-```bash
-build/bin/audiocpp_server
-```
-
-Build:
-
-```bash
-cmake --build build --parallel --target audiocpp_server
-```
-
-Create a config file with your own model paths:
-
-```bash
-cat > server.json <<'JSON'
-{
-  "host": "127.0.0.1",
-  "port": 8080,
-  "device": 0,
-  "threads": 1,
-  "lazy_load": true,
-  "models": [
-    {
-      "id": "pocket-tts",
-      "family": "pocket_tts",
-      "path": "/path/to/models/pocket-tts",
-      "task": "tts",
-      "mode": "offline",
-      "load_options": {
-        "language": "english"
-      },
-      "session_options": {
-        "language": "english"
-      }
-    },
-    {
-      "id": "qwen3-asr",
-      "family": "qwen3_asr",
-      "path": "/path/to/models/Qwen3-ASR-0.6B",
-      "task": "asr",
-      "mode": "offline"
-    }
-  ]
-}
-JSON
-```
-
-Set `"lazy_load": true` to register configured model ids at startup while loading each model only on first use. Use per-model `"lazy": true` or `"lazy": false` to override that default.
-
-> [!WARNING]
-> Lazy loading does not unload models after a request. Once a model is first used, the server keeps that model and session in memory for reuse until the server exits.
-
-Start:
-
-```bash
-build/bin/audiocpp_server --config server.json
-```
-
-The server exposes:
-
-- `GET /health`
-- `GET /v1/models`
-- `POST /v1/audio/speech`
-- `POST /v1/audio/transcriptions`
-- `POST /v1/tasks/run`
-
-More server examples are in [app/server/README.md](app/server/README.md).
-
-## Tests
-
-The repository includes both framework-level parity validation and app-level end-to-end path checks. At a high level, the flow is:
-
-<p align="center">
-  <img src="assets/figure/parity_test_flow.png" alt="Parity test flow" width="720" />
-</p>
-
-The main harness under `tests/` is `tests/warmbench.py`. It is used for long-lived multi-request validation, parity checks against Python references, and performance-oriented session reuse scenarios. The `tests/` tree also contains model-specific C++ and Python warmbench entrypoints that `warmbench.py` coordinates.
-
-The main app-facing test tooling under `tools/` is `tools/audiocpp_cli/run_audiocpp_cli_path_tests.py`. It drives `audiocpp_cli` through cataloged offline and streaming-shaped cases, verifies expected outputs such as audio or JSON artifacts, and is useful for checking real user-facing request paths rather than just lower-level model components. The streaming-shaped coverage here refers to the CLI/request path surface; it should not be read as a claim that streaming inference is broadly supported across the framework today.
-
-The Python-reference side of these tests usually requires more time-consuming setup than the C++ path because different models rely on different Python reference repos and dependency stacks. In practice, the framework-side tooling is fast to iterate on once models are installed, while Python parity runs often need extra environment preparation before they are ready.
-
-## Performance Metrics
-
-All performance metrics in this section were measured on Ubuntu with the CUDA backend on an NVIDIA GeForce RTX 5090. The Python-relative one-shot and long-lived-session comparisons come from direct framework/runtime API benchmark calls, not from `audiocpp_cli`; CLI path tests are separate and include app-layer request parsing, output writing, and other user-facing overhead.
-
-**Absolute RTF depends on the GPU and system setup, but the Python-relative speedups are real because audio.cpp and the matching Python reference paths were measured on the same CUDA setup.**
-
-audio.cpp already shows some genuinely exciting wins against the matching Python reference paths, especially on the TTS side, even when using the original model weights without quantization. The headline win is wall time: several TTS paths run **1.8x-5.0x faster** than Python while cutting end-to-end latency by **45%-80%**.
-
-- In one-shot runs, several TTS-family models already land far ahead of Python:
-  - `vevo2`: **5.03x faster** with **80.11% less wall time**
-  - `pocket tts`: **3.68x faster** with **72.80% less wall time**
-  - `miotts`: **2.73x faster** with **63.39% less wall time**
-  - `moss tts`: **2.33x faster** with **57.07% less wall time**
-  - `qwen3 tts`: **1.83x faster** with **45.34% less wall time**
-  - `vibevoice`: **1.40x faster** with **28.75% less wall time**
-- In long-lived-session runs, where the same loaded session serves multiple requests in sequence, the gains stay strong:
-  - `pocket tts`: **3.22x faster** with **68.91% less wall time**
-  - `qwen3 tts`: **2.74x faster** with **63.47% less wall time**
-  - `moss tts`: **2.66x faster** with **62.35% less wall time**
-  - `miotts`: **2.28x faster** with **56.22% less wall time**
-  - `vibevoice`: **1.77x faster** with **43.55% less wall time**
-  - `vevo2`: **1.75x faster** with **42.72% less wall time**
-- In long-form runs on the shared 6,026-character, 1,028-word passage, the strongest Python-relative wins still show up clearly:
-  - `pocket tts`: **3.15x faster** with **68.23% less wall time**
-  - `qwen3 tts`: **3.06x faster** with **67.33% less wall time**
-  - `vibevoice`: **2.86x faster** with **65.07% less wall time**
-  - `vevo2`: **1.77x faster** with **43.51% less wall time**
-  - `chatterbox`: **1.58x faster** with **36.83% less wall time**
-- These long-lived-session numbers are especially important for real applications, because they reflect the common case where model load, cached state, and reusable runtime setup are amortized across many requests.
-- Bars below the 1.0x line are useful too: they spotlight exactly where more optimization work is still worth doing.
-
-<p align="center">
-  <img src="assets/figure/perf_one_shot_20260630.svg" alt="One-shot" width="720" />
-</p>
-
-<p align="center">
-  <img src="assets/figure/perf_long_lived_session_20260630.svg" alt="Long-lived session" width="720" />
-</p>
-
-The figures report `Python wall time / audio.cpp wall time`. The 1.0x line means equal wall time; bars above 1.0x mean audio.cpp is faster than Python, and bars below 1.0x mean it is slower.
-
-For TTS-family models, the measured one-shot RTF is:
-
-| model | audio len (s) | wall time (s) | RTF | x faster than real time |
-|---|---:|---:|---:|---:|
-| chatterbox | 9.72 | 2.45 | 0.252 | 3.97x |
-| kokoro tts | 10.15 | 0.64 | 0.063 | 15.90x |
-| miotts | 20.40 | 3.30 | 0.162 | 6.18x |
-| moss tts | 9.60 | 0.97 | 0.101 | 9.91x |
-| omnivoice | 9.00 | 1.32 | 0.146 | 6.84x |
-| pocket tts | 8.08 | 0.26 | 0.032 | 31.09x |
-| qwen3 tts | 11.44 | 4.46 | 0.390 | 2.56x |
-| vevo2 | 8.66 | 2.47 | 0.285 | 3.51x |
-| vibevoice | 11.07 | 5.02 | 0.454 | 2.20x |
-| voxcpm2 | 5.60 | 3.09 | 0.551 | 1.81x |
-
-For long-form TTS tests, each run uses the same 6,026-character, 1,028-word input text (vibevoice uses 106,310 chars, 18,052 words, 4 speakers). The measured RTF is:
-
-| model | audio len (s) | wall time (s) | RTF | x faster than real time |
-|---|---:|---:|---:|---:|
-| chatterbox | 391.24 | 58.57 | 0.150 | 6.68x |
-| kokoro tts | 371.17 | 7.19 | 0.019 | 51.60x |
-| miotts | 399.16 | 66.59 | 0.167 | 5.99x |
-| moss tts | 301.36 | 25.00 | 0.083 | 12.06x |
-| omnivoice | 357.00 | 17.77 | 0.050 | 20.09x |
-| pocket tts | 353.12 | 7.30 | 0.021 | 48.40x |
-| qwen3 tts | 327.60 | 72.65 | 0.222 | 4.51x |
-| vevo2 | 457.68 | 52.47 | 0.115 | 8.72x |
-| voxcpm2 | 315.84 | 72.70 | 0.230 | 4.34x |
-| vibevoice | 5615.73 | 1376.84 | 0.245 | 4.08x |
-
-## Precision/Quantization Support
-
-Many model sessions expose quantization through `--session-option <family>.weight_type=<mode>`, and some families also expose more specific knobs such as `...conv_weight_type`, `...talker_weight_type`, or `...speech_decoder_weight_type`. The exact supported modes are model-specific rather than global.
-
-Example:
-
-```bash
-build/bin/audiocpp_cli --task tts --family qwen3_tts --model /path/to/model --session-option qwen3_tts.weight_type=q8_0
-```
-
-In practice, lower precision and quantized modes should be treated as model- and route-specific optimizations rather than universally safe defaults.
-
-- **Safety.** Quantization may not be safe on every path even when a model parser accepts the option. For example, in our ACE-Step 1.5 checks, lower-precision runs could fail at runtime with `ACE-Step planner masked decode found no valid token` while higher-precision settings completed normally.
-
-- **Quality Drop.** Output quality can drop a lot. In our VeVo2 checks, non-`fp32` outputs showed noticeably weaker similarity to the `fp32` reference under the repo's existing waveform and log-mel comparison metrics, and even output length could shift.
-
-- **Performance Gain.** The performance gain may be minor relative to that quality risk. For example, `q8_0` was faster than the default setting by only around 3.8% on Qwen3-TTS and around 3.6% on VeVo2. Other models may benefit more, but the tradeoff should be validated per model and per route rather than assumed.
-
-- **Memory Benefit.** Lower precision and quantized weights can still be useful for reducing weight memory footprint and making larger models easier to fit within device limits. For example, in our Qwen3-TTS checks, switching from the default setting to `q8_0` reduced peak RAM by about 3.7% and peak VRAM by about 25.0%. That benefit is real, but it should be evaluated together with runtime stability, output quality, and end-to-end speed rather than assumed from precision alone.
-
-## Notes
-
-- The repo supports multiple backends, but backend and model coverage are model-dependent.
-- GGUF model loading is planned, but not supported yet.
-- `Build_xcframework.sh` is outdated; Metal and Apple XCFramework packaging still need to be retested after the framework refactor.
+Check upstream model licenses before redistributing model weights or using them
+commercially.

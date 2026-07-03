@@ -20,6 +20,17 @@ std::filesystem::path resolve_model_root(const std::filesystem::path & model_pat
 }
 
 bool has_higgs_tts_assets(const std::filesystem::path & root) {
+    if (!engine::io::is_existing_directory(root)) {
+        return false;
+    }
+    for (const auto & entry : std::filesystem::directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            const auto extension = entry.path().extension().string();
+            if (extension == ".gguf" || extension == ".safetensors") {
+                return true;
+            }
+        }
+    }
     return engine::io::is_existing_file(root / "model.gguf") ||
            engine::io::is_existing_file(root / "model.safetensors");
 }
@@ -73,7 +84,7 @@ runtime::ModelMetadata make_metadata(const HiggsTTSAssets & assets) {
         "chat_template.jinja",
         "higgs_audio_v2_tokenizer_config.json",
     };
-    metadata.weight_candidates = {"model.gguf", "model.safetensors", "model.safetensors.index.json"};
+    metadata.weight_candidates = {"model.gguf", "*.gguf", "model.safetensors", "*.safetensors", "model.safetensors.index.json"};
     return metadata;
 }
 
@@ -106,12 +117,10 @@ public:
     bool can_load(const runtime::ModelLoadRequest & request) const override {
         try {
             const auto root = resolve_model_root(request.model_path);
-            if (!has_higgs_tts_assets(root) ||
-                (request.family_hint.has_value() && *request.family_hint != family())) {
+            if (request.family_hint.has_value() && *request.family_hint != family()) {
                 return false;
             }
-            (void) load_higgs_tts_assets(root);
-            return true;
+            return has_higgs_tts_assets(root);
         } catch (...) {
             return false;
         }

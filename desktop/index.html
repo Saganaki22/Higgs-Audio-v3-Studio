@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="teal">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Higgs Audio v3 Studio</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <!-- ═══════════ Topbar ═══════════ -->
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">🔊</div>
+          <div>
+            <h1>Higgs Audio v3 Studio</h1>
+            <p>Neural TTS · Voice Cloning · Audio Continuation</p>
+          </div>
+        </div>
+        <div class="status-stack">
+          <button id="settings-button" class="icon-button settings-button" type="button" aria-label="Settings">⚙</button>
+          <span id="engine-chip" class="chip">Engine unloaded</span>
+          <span id="model-chip" class="chip muted">No model</span>
+        </div>
+      </header>
+
+      <!-- ═══════════ Workspace ═══════════ -->
+      <section class="workspace">
+
+        <!-- ─── Left rail ─── -->
+        <aside class="sidebar">
+
+          <!-- Model panel -->
+          <section class="panel" id="model-panel">
+            <div class="panel-head">
+              <h2>Model</h2>
+              <span id="model-state" class="mini-state">Not loaded</span>
+            </div>
+            <label class="field-label">
+              <select id="model-select" class="select-input">
+                <option value="">Select a model…</option>
+              </select>
+            </label>
+            <div class="button-row">
+              <button id="browse-model-btn" class="compact-button" type="button">📁 Browse…</button>
+              <button id="download-trigger" class="compact-button" type="button">⬇ Download</button>
+            </div>
+            <div class="button-row">
+              <button id="load-engine-btn" class="compact-button" type="button">Load Engine</button>
+              <button id="load-model-btn" class="compact-button primary" type="button" disabled>Load Model</button>
+              <button id="unload-model-btn" class="compact-button" type="button" disabled>Unload</button>
+            </div>
+            <button id="download-engine-btn" class="compact-button full-width-button" type="button">⬇ Download DLL Engine</button>
+          </section>
+
+          <!-- Whisper panel -->
+          <section class="panel whisper-panel" id="whisper-panel">
+            <div class="panel-head">
+              <h2>Whisper</h2>
+              <button id="whisper-models-link" class="link-button panel-link" type="button">Choose model</button>
+            </div>
+            <label class="field-label" for="whisper-model-select">Whisper model</label>
+            <select id="whisper-model-select" class="select-input"></select>
+            <label class="field-label whisper-path-label" for="whisper-model-path">Selected file</label>
+            <input id="whisper-model-path" type="text" placeholder="Select ggml-base.en.bin…" class="text-input path-input" />
+            <div class="button-row">
+              <button id="whisper-browse-btn" class="compact-button" type="button">📁 Browse…</button>
+              <button id="whisper-download-trigger" class="compact-button" type="button">⬇ Download</button>
+            </div>
+          </section>
+
+          <!-- Hardware panel (port from SAM3DBody) -->
+          <section id="hardware-panel" class="hardware-panel">
+            <div class="panel-head">
+              <h2>Hardware</h2>
+              <div class="hardware-head-controls">
+                <label>Poll
+                  <select id="hardware-poll-rate" name="hardwarePollRate" title="Hardware monitor polling interval.">
+                    <option value="250">250ms</option>
+                    <option value="500">500ms</option>
+                    <option value="1000" selected>1000ms</option>
+                    <option value="1500">1500ms</option>
+                  </select>
+                </label>
+                <button id="hardware-toggle" class="icon-button" type="button" aria-label="Collapse hardware">−</button>
+              </div>
+            </div>
+            <div id="hardware-body" class="hardware-body">
+              <div class="hardware-grid">
+                <div class="hardware-meter">
+                  <div><span>VRAM</span><strong id="hw-vram-text">−</strong></div>
+                  <div class="meter-track"><div id="hw-vram-bar" class="meter-fill vram"></div></div>
+                </div>
+                <div class="hardware-meter">
+                  <div><span>GPU</span><strong id="hw-gpu-text">−</strong></div>
+                  <div class="meter-track"><div id="hw-gpu-bar" class="meter-fill gpu"></div></div>
+                </div>
+                <div class="hardware-meter">
+                  <div><span>Power</span><strong id="hw-power-text">−</strong></div>
+                  <div class="meter-track"><div id="hw-power-bar" class="meter-fill power"></div></div>
+                </div>
+                <div class="hardware-meter">
+                  <div><span>RAM</span><strong id="hw-ram-text">−</strong></div>
+                  <div class="meter-track"><div id="hw-ram-bar" class="meter-fill ram"></div></div>
+                </div>
+              </div>
+              <canvas id="hardware-graph" width="900" height="104"></canvas>
+              <div id="hardware-detail" class="progress-text">Waiting for GPU data</div>
+            </div>
+          </section>
+
+          <footer class="sidebar-footer">
+            <button id="github-link" class="footer-link" type="button">Saganaki22/Higgs-Audio-v3-Studio</button>
+            <button id="version-link" class="footer-link version-link" type="button">v0.1.0</button>
+          </footer>
+        </aside>
+
+        <!-- ─── Main content ─── -->
+        <section class="content">
+
+          <!-- Mode tabs -->
+          <div class="mode-tabs" role="tablist">
+            <button class="mode-tab active" data-mode="tts" role="tab" aria-selected="true">TTS</button>
+            <button class="mode-tab" data-mode="clone" role="tab" aria-selected="false">Voice Clone</button>
+            <button class="mode-tab" data-mode="finish" role="tab" aria-selected="false">Continue Speech</button>
+            <button class="mode-tab" data-mode="multi" role="tab" aria-selected="false">Multi Speaker</button>
+            <button class="mode-tab" data-mode="history" role="tab" aria-selected="false">History</button>
+          </div>
+
+          <!-- ═══ TTS mode ═══ -->
+          <div class="mode-content" id="mode-tts">
+            <div class="input-group">
+              <label for="tts-text" class="field-label">Text to speak</label>
+              <textarea id="tts-text" class="text-area" rows="6"
+                placeholder="Type or paste text here…"></textarea>
+              <div class="char-count"><span id="tts-count">0</span> / 2048</div>
+            </div>
+          </div>
+
+          <!-- ═══ Voice Clone mode ═══ -->
+          <div class="mode-content hidden" id="mode-clone">
+            <div class="input-group">
+              <label for="clone-text" class="field-label">Text to speak</label>
+              <textarea id="clone-text" class="text-area" rows="4"
+                placeholder="Type or paste text here…"></textarea>
+            </div>
+            <div class="input-group">
+              <label class="field-label">Reference voice</label>
+              <div class="dropzone" id="clone-dropzone" tabindex="0" role="button"
+                   aria-label="Drop audio file or click to browse">
+                <div class="dropzone-empty">
+                  <p>⤒ Drop audio file here, or click to browse</p>
+                  <p class="dropzone-hint">mp3 · wav · flac · m4a — any length</p>
+                </div>
+              </div>
+              <div class="ref-preview hidden" id="clone-ref-preview">
+                <div class="ref-playback">
+                  <button class="ref-play" id="clone-ref-play" type="button" aria-label="Play reference">▶</button>
+                  <input class="ref-seek" id="clone-ref-seek" type="range" min="0" max="1000" value="0" />
+                  <span class="ref-time" id="clone-ref-time">00:00 / 00:00</span>
+                </div>
+                <canvas class="ref-waveform" id="clone-ref-waveform"></canvas>
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="label-row">
+                <label for="clone-ref-text" class="field-label">Reference transcript (optional)</label>
+                <button id="auto-transcribe-btn" class="link-button" type="button">✦ Auto-transcribe</button>
+              </div>
+              <textarea id="clone-ref-text" class="text-area" rows="3"
+                placeholder="What the reference audio says…"></textarea>
+              <p class="input-hint">ⓘ Improves cloning fidelity. Leave blank to skip.</p>
+            </div>
+          </div>
+
+          <!-- ═══ Continue Speech mode ═══ -->
+          <div class="mode-content hidden" id="mode-finish">
+            <div class="input-group">
+              <label for="finish-text" class="field-label">Continuation text <span class="req-star">*</span></label>
+              <textarea id="finish-text" class="text-area" rows="3"
+                placeholder="What should be spoken after the input audio…"></textarea>
+              <p class="input-hint">ⓘ The text to generate after the input audio ends.</p>
+            </div>
+            <div class="input-group">
+              <label class="field-label">Audio to continue</label>
+              <div class="dropzone" id="finish-dropzone" tabindex="0" role="button"
+                   aria-label="Drop the clip to continue or click to browse">
+                <div class="dropzone-empty">
+                  <p>⤒ Drop the clip to continue, or click to browse</p>
+                  <p class="dropzone-hint">mp3 · wav · flac · m4a</p>
+                </div>
+              </div>
+              <div class="ref-preview hidden" id="finish-ref-preview">
+                <div class="ref-playback">
+                  <button class="ref-play" id="finish-ref-play" type="button" aria-label="Play reference">▶</button>
+                  <input class="ref-seek" id="finish-ref-seek" type="range" min="0" max="1000" value="0" />
+                  <span class="ref-time" id="finish-ref-time">00:00 / 00:00</span>
+                </div>
+                <canvas class="ref-waveform" id="finish-ref-waveform"></canvas>
+              </div>
+            </div>
+            <div class="input-group">
+              <div class="label-row">
+                <label for="finish-transcript" class="field-label">Voice transcript <span class="req-star">*</span></label>
+                <button id="finish-auto-transcribe-btn" class="link-button" type="button">✦ Auto-transcribe</button>
+              </div>
+              <textarea id="finish-transcript" class="text-area" rows="3"
+                placeholder="What the input audio says — type it or use auto-transcribe"></textarea>
+              <label class="inline-toggle">
+                <span>Include whole audio</span>
+                <span class="toggle-switch"><input type="checkbox" id="finish-include-source" /><span class="toggle-slider"></span></span>
+              </label>
+              <p class="input-hint">ⓘ Transcript of the input audio. Improves continuation quality.</p>
+            </div>
+          </div>
+
+          <!-- ═══ Multi Speaker mode ═══ -->
+          <div class="mode-content hidden" id="mode-multi">
+            <section class="workflow-section">
+              <div class="section-head">
+                <h3>Speakers</h3>
+                <div class="speaker-tag-row">
+                  <input id="speaker-tags-input" class="text-input" type="text" placeholder="Speaker1, Speaker2, Speaker3" />
+                  <button id="apply-speaker-tags" class="compact-button" type="button">Apply</button>
+                  <button id="add-speaker-btn" class="compact-button" type="button">+ Speaker</button>
+                </div>
+              </div>
+              <div id="speaker-library" class="speaker-library"></div>
+            </section>
+
+            <section class="workflow-section">
+              <div class="section-head">
+                <h3>Speech Lines</h3>
+                <button id="add-line-btn" class="compact-button" type="button">+ Line</button>
+              </div>
+              <div id="multi-lines" class="multi-lines"></div>
+            </section>
+          </div>
+
+          <!-- ═══ Advanced options (shared across all modes) ═══ -->
+          <details class="advanced-options" id="advanced-details">
+            <summary class="advanced-summary">▸ Advanced options</summary>
+            <div class="advanced-grid">
+              <label class="slider-label">
+                <span class="slider-name">Temperature</span>
+                <span class="tip" tabindex="0" data-tip="Default: 1.00. Controls sampling randomness. Higher is more varied; lower is more stable and repeatable.">?</span>
+                <input type="range" id="opt-temperature" min="0" max="2" step="0.05" value="1.0" />
+                <span class="slider-value" id="val-temperature">1.00</span>
+                <span class="slider-range">(0.0 – 2.0)</span>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Top-K</span>
+                <span class="tip" tabindex="0" data-tip="Default: 50. Samples from only the top K likely tokens. 0 usually disables this filter.">?</span>
+                <input type="range" id="opt-top-k" min="0" max="1026" step="1" value="50" />
+                <span class="slider-value" id="val-top-k">50</span>
+                <span class="slider-range">(0 – 1026)</span>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Top-P</span>
+                <span class="tip" tabindex="0" data-tip="Default: 0.95. Nucleus sampling. Lower values keep output closer to the most likely tokens.">?</span>
+                <input type="range" id="opt-top-p" min="0" max="1" step="0.01" value="0.95" />
+                <span class="slider-value" id="val-top-p">0.95</span>
+                <span class="slider-range">(0.0 – 1.0)</span>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Seed</span>
+                <span class="tip" tabindex="0" data-tip="Default: 0, Fixed. Controls repeatable randomness. Random changes every generation; increment and decrement step by 1 after each generation.">?</span>
+                <input type="number" id="opt-seed" value="0" class="number-input" />
+                <select id="opt-seed-mode" class="select-input seed-mode-select">
+                  <option value="fixed">Fixed</option>
+                  <option value="increment">Increment</option>
+                  <option value="decrement">Decrement</option>
+                  <option value="random">Random</option>
+                </select>
+                <button id="seed-randomize" class="dice-button" type="button" title="Randomize seed now">🎲</button>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Emotion</span>
+                <span class="tip" tabindex="0" data-tip="Default: None. Adds an optional emotion delivery tag when supported by the active Higgs backend/model.">?</span>
+                <select id="opt-emotion" class="select-input delivery-select">
+                  <option value="">None</option>
+                  <option value="elation">Elation</option>
+                  <option value="amusement">Amusement</option>
+                  <option value="enthusiasm">Enthusiasm</option>
+                  <option value="determination">Determination</option>
+                  <option value="pride">Pride</option>
+                  <option value="contentment">Contentment</option>
+                  <option value="affection">Affection</option>
+                  <option value="relief">Relief</option>
+                  <option value="contemplation">Contemplation</option>
+                  <option value="confusion">Confusion</option>
+                  <option value="surprise">Surprise</option>
+                  <option value="awe">Awe</option>
+                  <option value="longing">Longing</option>
+                  <option value="arousal">Arousal</option>
+                  <option value="anger">Anger</option>
+                  <option value="fear">Fear</option>
+                  <option value="disgust">Disgust</option>
+                  <option value="bitterness">Bitterness</option>
+                  <option value="sadness">Sadness</option>
+                  <option value="shame">Shame</option>
+                  <option value="helplessness">Helplessness</option>
+                </select>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Style</span>
+                <span class="tip" tabindex="0" data-tip="Default: None. Adds an optional style tag such as singing, shouting, or whispering when supported.">?</span>
+                <select id="opt-style" class="select-input delivery-select">
+                  <option value="">None</option>
+                  <option value="singing">Singing</option>
+                  <option value="shouting">Shouting</option>
+                  <option value="whispering">Whispering</option>
+                </select>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Speed</span>
+                <span class="tip" tabindex="0" data-tip="Default: None. Adds an optional speaking-speed tag. Use only when the backend/model supports it.">?</span>
+                <select id="opt-speed" class="select-input delivery-select">
+                  <option value="">None</option>
+                  <option value="speed_very_slow">Very slow</option>
+                  <option value="speed_slow">Slow</option>
+                  <option value="speed_fast">Fast</option>
+                  <option value="speed_very_fast">Very fast</option>
+                </select>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Pitch</span>
+                <span class="tip" tabindex="0" data-tip="Default: None. Adds an optional low/high pitch tag when supported by the backend/model.">?</span>
+                <select id="opt-pitch" class="select-input delivery-select">
+                  <option value="">None</option>
+                  <option value="pitch_low">Low</option>
+                  <option value="pitch_high">High</option>
+                </select>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Expressiveness</span>
+                <span class="tip" tabindex="0" data-tip="Default: None. Adds an optional high/low expressiveness tag when supported.">?</span>
+                <select id="opt-expressive" class="select-input delivery-select">
+                  <option value="">None</option>
+                  <option value="expressive_high">High</option>
+                  <option value="expressive_low">Low</option>
+                </select>
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Max tokens</span>
+                <span class="tip" tabindex="0" data-tip="Default: 2048. Caps generated token count. Higher allows longer output but can take longer and use more memory.">?</span>
+                <input type="number" id="opt-max-tokens" value="2048" min="32" max="8192" step="8" class="number-input" />
+              </label>
+              <label class="slider-label">
+                <span class="slider-name">Longform chunking</span>
+                <span class="tip" tabindex="0" data-tip="Default: Off. Splits long text into smaller generations and joins the results. Useful for long passages.">?</span>
+                <label class="toggle-switch"><input type="checkbox" id="opt-chunk-enabled" /><span class="toggle-slider"></span></label>
+              </label>
+              <label class="slider-label" id="chunk-size-row">
+                <span class="slider-name">Chunk size</span>
+                <span class="tip" tabindex="0" data-tip="Default: 45. Approximate text chunk size used only when longform chunking is enabled.">?</span>
+                <input type="number" id="opt-chunk-size" value="45" min="20" max="300" step="5" class="number-input" disabled />
+              </label>
+              <label class="slider-label" id="pause-row">
+                <span class="slider-name">Pause (sec)</span>
+                <span class="tip" tabindex="0" data-tip="Default: 0.15 sec. Adds silence between chunks when longform chunking is enabled.">?</span>
+                <input type="range" id="opt-pause" min="0" max="2" step="0.05" value="0.15" disabled />
+                <span class="slider-value" id="val-pause">0.15</span>
+              </label>
+              <label class="slider-label multi-only-advanced hidden" id="speaker-pause-row">
+                <span class="slider-name">Speaker pause</span>
+                <span class="tip" tabindex="0" data-tip="Default: 0.15 sec. Multi Speaker only. Adds silence between generated speaker lines after they are stitched together.">?</span>
+                <input type="range" id="opt-speaker-pause" min="0" max="0.8" step="0.01" value="0.15" />
+                <span class="slider-value" id="val-speaker-pause">0.15</span>
+                <span class="slider-range">(0.00 – 0.80)</span>
+              </label>
+            </div>
+          </details>
+
+          <!-- ═══ History mode ═══ -->
+          <div class="mode-content hidden" id="mode-history">
+            <div class="history-head">
+              <h3>Generation History</h3>
+              <button id="history-clear-all" class="compact-button hidden" type="button">Clear All</button>
+            </div>
+            <div id="recent-list" class="history-list">
+              <p class="empty-state">No generations yet</p>
+            </div>
+          </div>
+
+          <!-- ═══ Generate / Cancel ═══ -->
+          <div class="action-row" id="action-row">
+            <button id="generate-btn" class="primary-btn" type="button">▶ Generate</button>
+            <button id="cancel-btn" class="cancel-btn hidden" type="button">⏹ Cancel</button>
+          </div>
+
+          <!-- ═══ Progress ═══ -->
+          <div class="progress-section hidden" id="progress-section">
+            <div class="progress-track">
+              <div class="progress-bar" id="gen-progress-bar"></div>
+            </div>
+            <div id="gen-progress-steps" class="progress-steps"></div>
+            <span id="gen-progress-text" class="progress-text"></span>
+          </div>
+
+          <!-- ═══ Audio output ═══ -->
+          <div class="output-section hidden" id="output-section">
+            <div class="output-head">
+              <h3>Output</h3>
+              <div class="save-menu">
+                <button id="download-output-btn" class="compact-button" type="button">⬇ Save</button>
+                <div class="save-options" role="menu" aria-label="Save format">
+                  <button class="save-format active" data-format="wav" type="button">✓ WAV</button>
+                  <button class="save-format" data-format="mp3" type="button">MP3</button>
+                </div>
+              </div>
+            </div>
+            <div class="audio-player">
+              <canvas id="waveform-canvas" class="waveform-canvas"></canvas>
+              <div class="player-controls">
+                <button id="play-btn" class="play-button" type="button">▶</button>
+                <span id="output-time" class="time-label">00:00 / 00:00</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ═══════════ Settings popover ═══════════ -->
+      <div id="settings-popover" class="settings-popover" hidden>
+        <div class="settings-head">
+          <strong>Settings</strong>
+          <button id="settings-close" class="popover-close" type="button" aria-label="Close settings">✕</button>
+        </div>
+        <div class="settings-row">
+          <span>Theme</span>
+          <div class="segmented">
+            <button id="theme-dark" class="active" type="button">Dark</button>
+            <button id="theme-light" type="button">Light</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <span>Accent</span>
+          <div class="accent-picker" aria-label="Accent color">
+            <button class="accent-dot accent-teal active" data-accent-choice="teal" type="button"></button>
+            <button class="accent-dot accent-blue" data-accent-choice="blue" type="button"></button>
+            <button class="accent-dot accent-green" data-accent-choice="green" type="button"></button>
+            <button class="accent-dot accent-red" data-accent-choice="red" type="button"></button>
+            <button class="accent-dot accent-yellow" data-accent-choice="yellow" type="button"></button>
+          </div>
+        </div>
+        <label class="settings-scale">
+          UI scale
+          <input id="ui-scale" type="range" min="90" max="115" value="100" />
+          <span id="ui-scale-label">100%</span>
+        </label>
+      </div>
+
+      <!-- ═══════════ Download popover ═══════════ -->
+      <div id="download-popover" class="settings-popover" hidden>
+        <div class="settings-head">
+          <strong id="download-title">Download Model</strong>
+          <button id="download-close" class="popover-close" type="button" aria-label="Close">✕</button>
+        </div>
+        <div class="download-url-row">
+          <input id="download-url-input" type="url" placeholder="Paste HuggingFace GGUF URL…" class="text-input" />
+          <button id="download-fetch-btn" class="compact-button primary" type="button">Fetch</button>
+        </div>
+        <div id="download-progress-container" class="download-progress-container hidden">
+          <div class="progress-track">
+            <div class="progress-bar" id="download-progress-bar"></div>
+          </div>
+          <div class="download-stats">
+            <span id="download-size-text">0 / 0 GB</span>
+            <span id="download-speed-text">0 MB/s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ Toast ═══════════ -->
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <!-- Hidden audio element for playback -->
+      <audio id="audio-player" preload="auto"></audio>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

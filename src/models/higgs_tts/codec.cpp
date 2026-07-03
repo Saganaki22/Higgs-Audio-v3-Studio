@@ -2080,6 +2080,11 @@ struct HiggsAudioCodecDecoderRuntime::Impl {
         return graph->run(codes);
     }
 
+    void release_runtime_cache() {
+        encoder_graph.reset();
+        graph.reset();
+    }
+
     std::shared_ptr<HiggsAudioCodecWeightsRuntime> weights;
     size_t graph_arena_bytes = 0;
     std::unique_ptr<EncoderGraph> encoder_graph;
@@ -2107,6 +2112,10 @@ HiggsAudioCodeMatrix HiggsAudioCodecDecoderRuntime::encode_reference_audio(const
 
 runtime::AudioBuffer HiggsAudioCodecDecoderRuntime::decode(const HiggsAudioCodeMatrix & raw_codes) {
     return impl_->decode(raw_codes);
+}
+
+void HiggsAudioCodecDecoderRuntime::release_runtime_cache() {
+    impl_->release_runtime_cache();
 }
 
 }  // namespace engine::models::higgs_tts

@@ -25,6 +25,7 @@ public:
 
     HiggsAudioCodeMatrix encode_reference_audio(const runtime::AudioBuffer & audio);
     runtime::AudioBuffer decode(const HiggsAudioCodeMatrix & raw_codes);
+    void release_runtime_cache();
 
 private:
     std::unique_ptr<Impl> impl_;

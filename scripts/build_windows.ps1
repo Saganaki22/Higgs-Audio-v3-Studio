@@ -381,7 +381,8 @@ $configureArgs = @(
     "-DENGINE_ENABLE_METAL=OFF",
     "-DGGML_OPENMP=ON",
     "-DGGML_NATIVE=$($settings.Native)",
-    "-DENGINE_BUILD_TESTS=$($settings.BuildTests)"
+    "-DENGINE_BUILD_TESTS=$($settings.BuildTests)",
+    "-DENGINE_BUILD_DESKTOP_API=ON"
 )
 if ($settings.CFlagsDebug -ne "") {
     $configureArgs += "-DCMAKE_C_FLAGS_DEBUG=$($settings.CFlagsDebug)"

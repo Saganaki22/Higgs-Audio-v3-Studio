@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/models/whisper/
+vite-dev.log
+
+src-tauri/resources/engine/*
+!src-tauri/resources/engine/.gitkeep
+!src-tauri/resources/engine/README.txt

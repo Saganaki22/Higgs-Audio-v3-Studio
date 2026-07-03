@@ -1089,6 +1089,7 @@ struct HiggsTTSGeneratorRuntime::Impl {
         auto timing_start = Clock::now();
         auto prefill = prefill_graph->run(prompt.input_ids, reference_delayed_codes);
         debug::timing_log_scalar("higgs_tts.generator.prefill_total_ms", engine::debug::elapsed_ms(timing_start, Clock::now()));
+        prefill_graph.reset();
         const int64_t required_cache_steps = prompt_steps + options.max_tokens;
         if (decode_graph == nullptr || !decode_graph->can_run(*weights, required_cache_steps)) {
             decode_graph = std::make_unique<DecodeGraph>(weights, required_cache_steps, decode_graph_arena_bytes);

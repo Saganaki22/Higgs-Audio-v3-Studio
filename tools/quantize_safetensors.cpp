@@ -228,6 +228,22 @@ bool should_quantize(
     throw std::runtime_error("unknown quantization policy: " + options.policy);
 }
 
+bool is_floating_target(ggml_type target_ggml_type) {
+    return target_ggml_type == GGML_TYPE_F32 ||
+           target_ggml_type == GGML_TYPE_F16 ||
+           target_ggml_type == GGML_TYPE_BF16;
+}
+
+bool should_reencode(
+    const engine::assets::TensorMetadata & metadata,
+    const Options & options,
+    ggml_type target_ggml_type) {
+    if (is_floating_target(target_ggml_type)) {
+        return is_supported_source_dtype(metadata.dtype);
+    }
+    return should_quantize(metadata, options, target_ggml_type);
+}
+
 void write_gguf_file(
     const std::filesystem::path & output,
     const std::vector<engine::io::SafeTensorWriteEntry> & entries) {
@@ -320,7 +336,7 @@ Options parse_args(int argc, char ** argv) {
         } else if (arg == "--help" || arg == "-h") {
             std::cout
                 << "usage: quantize_safetensors --input model.safetensors --output model.safetensors|model.gguf "
-                   "--type q8_0|q4_0|q4_k --policy all|higgs_tts\n";
+                   "--type f32|f16|bf16|q8_0|q4_0|q4_k --policy all|higgs_tts\n";
             std::exit(0);
         } else {
             throw std::runtime_error("unknown argument: " + arg);
@@ -331,8 +347,8 @@ Options parse_args(int argc, char ** argv) {
     }
     options.output_format = output_format_from_path(options.output);
     const ggml_type target_ggml_type = engine::assets::ggml_type_for_tensor_storage(options.target_type);
-    if (!ggml_is_quantized(target_ggml_type)) {
-        throw std::runtime_error("--type must be a quantized ggml storage type");
+    if (!is_floating_target(target_ggml_type) && !ggml_is_quantized(target_ggml_type)) {
+        throw std::runtime_error("--type must be f32, f16, bf16, or a supported quantized ggml storage type");
     }
     if (ggml_quantize_requires_imatrix(target_ggml_type)) {
         throw std::runtime_error("--type requires an importance matrix and is not supported by this tool");
@@ -355,7 +371,7 @@ int main(int argc, char ** argv) {
 
         std::vector<engine::io::SafeTensorWriteEntry> entries;
         entries.reserve(metadata.size());
-        size_t quantized = 0;
+        size_t converted = 0;
         size_t preserved = 0;
         uint64_t output_bytes = 0;
 
@@ -370,12 +386,13 @@ int main(int argc, char ** argv) {
             entry.name = tensor.name;
             entry.shape = tensor.shape;
 
-            if (should_quantize(tensor, options, target_ggml_type)) {
+            if (should_reencode(tensor, options, target_ggml_type)) {
                 const auto data = source->require_tensor(tensor.name, options.target_type, tensor.shape);
                 entry.dtype = target_dtype;
                 entry.data = to_unsigned_bytes(data.bytes);
-                ++quantized;
-                std::cout << "quantized " << tensor.name << " " << tensor.dtype << " -> " << target_dtype << "\n";
+                ++converted;
+                std::cout << (ggml_is_quantized(target_ggml_type) ? "quantized " : "converted ")
+                          << tensor.name << " " << tensor.dtype << " -> " << target_dtype << "\n";
             } else {
                 const auto raw = source->require_tensor_data(tensor.name);
                 entry.dtype = raw.metadata.dtype;
@@ -393,7 +410,7 @@ int main(int argc, char ** argv) {
             engine::io::write_safetensors_file(options.output, entries);
         }
 
-        std::cout << "wrote " << entries.size() << " tensors, quantized " << quantized
+        std::cout << "wrote " << entries.size() << " tensors, converted " << converted
                   << ", preserved " << preserved << ", payload bytes " << output_bytes << "\n";
         return 0;
     } catch (const std::exception & ex) {

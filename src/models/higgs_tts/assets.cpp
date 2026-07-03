@@ -4,6 +4,7 @@
 #include "engine/framework/io/filesystem.h"
 #include "engine/framework/io/json.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <optional>
 #include <stdexcept>
@@ -36,6 +37,25 @@ bool is_model_weight_file(const std::filesystem::path & path) {
     return extension == ".safetensors" || extension == ".gguf";
 }
 
+std::filesystem::path first_model_weight_file(
+    const std::filesystem::path & model_root,
+    const std::string & extension) {
+    if (!engine::io::is_existing_directory(model_root)) {
+        return {};
+    }
+    std::vector<std::filesystem::path> matches;
+    for (const auto & entry : std::filesystem::directory_iterator(model_root)) {
+        if (entry.is_regular_file() && entry.path().extension() == extension) {
+            matches.push_back(entry.path());
+        }
+    }
+    if (matches.empty()) {
+        return {};
+    }
+    std::sort(matches.begin(), matches.end());
+    return canonical_existing_file(matches.front());
+}
+
 std::filesystem::path resolve_model_weights_path(
     const std::filesystem::path & model_path,
     const std::filesystem::path & model_root) {
@@ -50,8 +70,16 @@ std::filesystem::path resolve_model_weights_path(
     if (engine::io::is_existing_file(safetensors)) {
         return canonical_existing_file(safetensors);
     }
+    if (const auto discovered_gguf = first_model_weight_file(model_root, ".gguf"); !discovered_gguf.empty()) {
+        return discovered_gguf;
+    }
+    if (const auto discovered_safetensors = first_model_weight_file(model_root, ".safetensors"); !discovered_safetensors.empty()) {
+        return discovered_safetensors;
+    }
     throw std::runtime_error(
-        "Higgs TTS missing model weights; searched:\n  " + gguf.string() + "\n  " + safetensors.string());
+        "Higgs TTS missing model weights; searched:\n  " + gguf.string() + "\n  " + safetensors.string() +
+        "\n  " + (model_root / "*.gguf").string() +
+        "\n  " + (model_root / "*.safetensors").string());
 }
 
 std::optional<std::filesystem::path> env_path(const char * name) {

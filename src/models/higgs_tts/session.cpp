@@ -2,8 +2,12 @@
 
 #include "engine/framework/debug/profiler.h"
 #include "engine/framework/runtime/options.h"
+#include "engine/framework/text/chunking.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <chrono>
+#include <cstring>
 #include <stdexcept>
 #include <utility>
 
@@ -17,6 +21,7 @@ constexpr size_t kDefaultGeneratorPrefillGraphArenaBytes = 1024ull * 1024ull * 1
 constexpr size_t kDefaultGeneratorDecodeGraphArenaBytes = 1024ull * 1024ull * 1024ull;
 constexpr size_t kDefaultCodecWeightContextBytes = 1024ull * 1024ull * 1024ull;
 constexpr size_t kDefaultCodecGraphArenaBytes = 1024ull * 1024ull * 1024ull;
+constexpr int64_t kDefaultTextChunkSize = 1024;
 
 std::shared_ptr<const HiggsTTSAssets> require_assets(std::shared_ptr<const HiggsTTSAssets> assets) {
     if (assets == nullptr) {
@@ -79,6 +84,41 @@ HiggsTTSGenerationOptions generation_options_from_request(const runtime::TaskReq
         throw std::runtime_error("Higgs TTS top_p must be in [0, 1]");
     }
     return out;
+}
+
+struct ReferenceAudioKey {
+    int sample_rate = 0;
+    int channels = 0;
+    std::size_t sample_count = 0;
+    std::uint64_t fingerprint = 0;
+};
+
+ReferenceAudioKey reference_audio_key(const runtime::AudioBuffer & audio) {
+    ReferenceAudioKey key;
+    key.sample_rate = audio.sample_rate;
+    key.channels = audio.channels;
+    key.sample_count = audio.samples.size();
+    std::uint64_t fp = 14695981039346656037ull;
+    for (const float sample : audio.samples) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &sample, sizeof(bits));
+        fp ^= static_cast<std::uint64_t>(bits);
+        fp *= 1099511628211ull;
+    }
+    key.fingerprint = fp;
+    return key;
+}
+
+bool reference_key_matches(
+    const ReferenceAudioKey & key,
+    std::uint64_t cached_fingerprint,
+    std::size_t cached_sample_count,
+    int cached_sample_rate,
+    int cached_channels) {
+    return key.sample_rate == cached_sample_rate &&
+           key.channels == cached_channels &&
+           key.sample_count == cached_sample_count &&
+           key.fingerprint == cached_fingerprint;
 }
 
 }  // namespace
@@ -161,6 +201,24 @@ runtime::TaskResult HiggsTTSSession::run(const runtime::TaskRequest & request) {
     if (!request.text_input.has_value() || request.text_input->text.empty()) {
         throw std::runtime_error("Higgs TTS requires text input");
     }
+    const int64_t text_chunk_size =
+        engine::text::parse_text_chunk_size_override(request.options).value_or(kDefaultTextChunkSize);
+    const auto chunk_requests = runtime::chunk_text_request(request, text_chunk_size);
+    engine::debug::trace_log_scalar("higgs_tts.text_chunks", static_cast<int64_t>(chunk_requests.size()));
+    runtime::AudioBuffer merged_audio;
+    for (const auto & chunk_request : chunk_requests) {
+        if (!chunk_request.text_input.has_value() || chunk_request.text_input->text.empty()) {
+            continue;
+        }
+        runtime::append_audio_buffer(merged_audio, run_chunk(chunk_request));
+    }
+    engine::debug::timing_log_scalar("session.wall_ms", engine::debug::elapsed_ms(wall_start));
+    runtime::TaskResult result;
+    result.audio_output = std::move(merged_audio);
+    return result;
+}
+
+runtime::AudioBuffer HiggsTTSSession::run_chunk(const runtime::TaskRequest & request) {
     const std::string reference_text =
         request.options.count("reference_text") != 0 ? request.options.at("reference_text") : std::string{};
     const auto generation = generation_options_from_request(request);
@@ -173,10 +231,30 @@ runtime::TaskResult HiggsTTSSession::run(const runtime::TaskRequest & request) {
     if (request.voice.has_value() &&
         request.voice->speaker.has_value() &&
         request.voice->speaker->audio.has_value()) {
-        auto reference_raw_codes = codec_decoder_->encode_reference_audio(*request.voice->speaker->audio);
-        reference_delayed_codes = apply_delay_pattern(reference_raw_codes);
-        engine::debug::trace_log_scalar("higgs_tts.reference.raw_code_frames", reference_raw_codes.frames);
-        engine::debug::trace_log_scalar("higgs_tts.reference.delayed_code_rows", reference_delayed_codes->frames);
+        const auto & reference_audio = *request.voice->speaker->audio;
+        const auto key = reference_audio_key(reference_audio);
+        if (has_cached_reference_ &&
+            cached_reference_codes_.has_value() &&
+            reference_key_matches(
+                key,
+                cached_reference_fingerprint_,
+                cached_reference_sample_count_,
+                cached_reference_sample_rate_,
+                cached_reference_channels_)) {
+            reference_delayed_codes = cached_reference_codes_;
+            engine::debug::trace_log_scalar("higgs_tts.reference.cache_hit", 1);
+        } else {
+            auto reference_raw_codes = codec_decoder_->encode_reference_audio(reference_audio);
+            reference_delayed_codes = apply_delay_pattern(reference_raw_codes);
+            engine::debug::trace_log_scalar("higgs_tts.reference.raw_code_frames", reference_raw_codes.frames);
+            engine::debug::trace_log_scalar("higgs_tts.reference.delayed_code_rows", reference_delayed_codes->frames);
+            cached_reference_codes_ = reference_delayed_codes;
+            cached_reference_fingerprint_ = key.fingerprint;
+            cached_reference_sample_count_ = key.sample_count;
+            cached_reference_sample_rate_ = key.sample_rate;
+            cached_reference_channels_ = key.channels;
+            has_cached_reference_ = true;
+        }
     }
     const auto prompt = tokenizer_.build_prompt(
         request.text_input->text,
@@ -189,10 +267,8 @@ runtime::TaskResult HiggsTTSSession::run(const runtime::TaskRequest & request) {
     engine::debug::trace_log_scalar("higgs_tts.delayed_code_rows", codes.delayed_codes.frames);
     engine::debug::trace_log_scalar("higgs_tts.raw_code_frames", codes.raw_codes.frames);
     auto audio = codec_decoder_->decode(codes.raw_codes);
-    engine::debug::timing_log_scalar("session.wall_ms", engine::debug::elapsed_ms(wall_start));
-    runtime::TaskResult result;
-    result.audio_output = std::move(audio);
-    return result;
+    codec_decoder_->release_runtime_cache();
+    return audio;
 }
 
 }  // namespace engine::models::higgs_tts

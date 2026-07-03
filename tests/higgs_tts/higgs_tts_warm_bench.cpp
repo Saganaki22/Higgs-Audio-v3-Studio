@@ -1,5 +1,6 @@
 #include "engine/framework/audio/wav_reader.h"
 #include "engine/framework/audio/wav_writer.h"
+#include "engine/framework/core/backend.h"
 #include "engine/framework/debug/trace.h"
 #include "engine/framework/io/json.h"
 #include "engine/framework/runtime/registry.h"
@@ -194,6 +195,8 @@ engine::io::json::Value step_json(
     const engine::runtime::TaskResult & result,
     int request_index,
     double wall_ms,
+    const engine::core::BackendMemorySnapshot & memory_before,
+    const engine::core::BackendMemorySnapshot & memory_after,
     const std::filesystem::path & audio_path) {
     if (!result.audio_output.has_value()) {
         throw std::runtime_error("Higgs TTS warmbench expected audio output");
@@ -208,7 +211,14 @@ engine::io::json::Value step_json(
     return engine::io::json::Value::make_object({
         {"request_index", number(static_cast<double>(request_index))},
         {"stems", engine::io::json::Value::make_array({engine::io::json::Value::make_object(std::move(stem))})},
-        {"metrics", engine::io::json::Value::make_object({{"wall_ms", number(wall_ms)}})},
+        {"metrics", engine::io::json::Value::make_object({
+            {"wall_ms", number(wall_ms)},
+            {"cuda_memory_available", number(memory_after.available ? 1.0 : 0.0)},
+            {"cuda_memory_total_bytes", number(static_cast<double>(memory_after.total_bytes))},
+            {"cuda_memory_used_before_bytes", number(static_cast<double>(memory_before.used_bytes))},
+            {"cuda_memory_used_after_bytes", number(static_cast<double>(memory_after.used_bytes))},
+            {"cuda_memory_used_delta_bytes", number(static_cast<double>(memory_after.used_bytes - memory_before.used_bytes))},
+        })},
     });
 }
 
@@ -287,12 +297,14 @@ int main(int argc, char ** argv) {
         for (size_t request_index = 0; request_index < requests.size(); ++request_index) {
             engine::runtime::TaskResult last_result;
             double total_ms = 0.0;
+            const auto memory_before = engine::core::query_backend_memory(options.backend);
             for (int iteration = 0; iteration < std::max(1, iterations); ++iteration) {
                 const auto started = std::chrono::steady_clock::now();
                 last_result = session->run(requests[request_index]);
                 const auto ended = std::chrono::steady_clock::now();
                 total_ms += std::chrono::duration<double, std::milli>(ended - started).count();
             }
+            const auto memory_after = engine::core::query_backend_memory(options.backend);
             if (!last_result.audio_output.has_value()) {
                 throw std::runtime_error("Higgs TTS warmbench expected audio output");
             }
@@ -308,8 +320,17 @@ int main(int argc, char ** argv) {
             }
             timing_lines.push_back(
                 "higgs_tts.cpp.request_" + std::to_string(request_index) + ".wall_ms=" + std::to_string(wall_ms));
+            timing_lines.push_back(
+                "higgs_tts.cpp.request_" + std::to_string(request_index) + ".cuda_memory_used_before_bytes=" +
+                std::to_string(memory_before.used_bytes));
+            timing_lines.push_back(
+                "higgs_tts.cpp.request_" + std::to_string(request_index) + ".cuda_memory_used_after_bytes=" +
+                std::to_string(memory_after.used_bytes));
+            timing_lines.push_back(
+                "higgs_tts.cpp.request_" + std::to_string(request_index) + ".cuda_memory_used_delta_bytes=" +
+                std::to_string(memory_after.used_bytes - memory_before.used_bytes));
             std::cout << "higgs_tts.cpp.wall_ms=" << wall_ms << "\n";
-            steps.push_back(step_json(last_result, static_cast<int>(request_index), wall_ms, audio_path));
+            steps.push_back(step_json(last_result, static_cast<int>(request_index), wall_ms, memory_before, memory_after, audio_path));
         }
 
         write_timing(timing_path, timing_lines);
