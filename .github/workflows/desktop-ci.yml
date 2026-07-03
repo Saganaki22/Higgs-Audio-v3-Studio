@@ -1,4 +1,4 @@
-name: Desktop CI
+name: Higgs Audio v3 Studio Desktop CI
 
 on:
   push:

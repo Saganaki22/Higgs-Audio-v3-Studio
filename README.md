@@ -7,6 +7,10 @@
 ![Engine](https://img.shields.io/badge/engine-C%2B%2B%20DLL%20via%20C%20ABI-00599C)
 ![Build](https://img.shields.io/badge/build-MSVC%202022-success)
 
+[中文说明](README_ZH.md)
+
+Author: [Saganaki22](https://github.com/Saganaki22)
+
 Higgs Audio v3 Studio `0.1.0` is a Windows desktop app for running the `audio.cpp`
 Higgs Audio v3 TTS engine in-process. The app does not shell out to a CLI sidecar.
 The Tauri UI calls Rust commands, Rust loads `audiocpp_engine.dll` with `libloading`,
@@ -494,6 +498,14 @@ navigation.
 
 </details>
 
+## Responsible Use
+
+Do not use Higgs Audio v3 Studio, Higgs TTS 3, or any voice-cloning workflow to
+impersonate people without consent, create malicious or deceptive voices, defraud
+others, evade identification, harass people, or cause harm. Generated voices
+should be used only where you have the rights and consent needed for the source
+voice, transcript, and intended output.
+
 ## Project Layout
 
 ```text
@@ -519,3 +531,20 @@ This desktop app builds on:
 
 Check upstream model licenses before redistributing model weights or using them
 commercially.
+
+## Citation
+
+```bibtex
+@misc{bosonai_higgs_audio_tts_v3_2026,
+  title  = {Higgs TTS 3: Conversational Speech for Voice AI from Boson AI},
+  author = {Boson AI},
+  year   = {2026},
+  howpublished = {https://huggingface.co/bosonai/higgs-tts-3-4b},
+}
+```
+
+## License
+
+Application source code in this repository is Apache 2.0; see `LICENSE`.
+Higgs TTS 3 model weights and upstream model assets are governed by the Boson
+Higgs TTS 3 Research and Non-Commercial License; see the upstream model license.
