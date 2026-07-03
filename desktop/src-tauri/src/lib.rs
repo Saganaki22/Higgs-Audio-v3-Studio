@@ -6,7 +6,7 @@ use engine::{Engine, EngineError, GenerateRequest, LoadModelRequest, ProgressCal
 use nvml_wrapper::Nvml;
 use serde::Serialize;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use sysinfo::{Pid, System};
 use tauri::{App, AppHandle, Emitter, Manager, State};
@@ -133,13 +133,20 @@ fn map_engine_err(e: &EngineError) -> String {
     }
 }
 
-fn configure_higgs_asset_env(app: &App) {
-    if std::env::var_os("HIGGS_TTS_SMALL_ASSETS_ROOT").is_some() {
+fn is_higgs_asset_root(path: &Path) -> bool {
+    path.join("config.json").exists() && path.join("tokenizer.json").exists()
+}
+
+fn configure_higgs_asset_env_from_resource_dir(resource_dir: Option<PathBuf>) {
+    if std::env::var_os("HIGGS_TTS_SMALL_ASSETS_ROOT")
+        .map(|value| is_higgs_asset_root(&PathBuf::from(value)))
+        .unwrap_or(false)
+    {
         return;
     }
 
     let mut candidates = Vec::new();
-    if let Ok(resource_dir) = app.path().resource_dir() {
+    if let Some(resource_dir) = resource_dir {
         let bundled_assets = resource_dir.join("higgs-assets");
         candidates.push(bundled_assets.join("higgs-audio-v3-tts-4b"));
         candidates.push(bundled_assets);
@@ -153,10 +160,18 @@ fn configure_higgs_asset_env(app: &App) {
 
     if let Some(root) = candidates
         .into_iter()
-        .find(|path| path.join("config.json").exists() && path.join("tokenizer.json").exists())
+        .find(|path| is_higgs_asset_root(path))
     {
         std::env::set_var("HIGGS_TTS_SMALL_ASSETS_ROOT", root);
     }
+}
+
+fn configure_higgs_asset_env(app: &App) {
+    configure_higgs_asset_env_from_resource_dir(app.path().resource_dir().ok());
+}
+
+fn configure_higgs_asset_env_for_handle(app: &AppHandle) {
+    configure_higgs_asset_env_from_resource_dir(app.path().resource_dir().ok());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -283,6 +298,8 @@ async fn load_model(
     state: State<'_, AppState>,
     request: LoadModelRequest,
 ) -> Result<serde_json::Value, String> {
+    configure_higgs_asset_env_for_handle(&app);
+
     let engine = {
         let guard = state.engine.lock().unwrap();
         guard.as_ref().ok_or("engine not loaded")?.clone()
