@@ -1,0 +1,44 @@
+name: Desktop CI
+
+on:
+  push:
+    branches:
+      - main
+      - higgs-tts-port
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  desktop:
+    name: Tauri desktop checks
+    runs-on: windows-2022
+
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build:vite
+
+      - name: Check Tauri Rust crate
+        working-directory: desktop/src-tauri
+        run: cargo check --locked
