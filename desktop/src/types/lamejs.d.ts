@@ -11,3 +11,8 @@ declare module "lamejs" {
 
   export default lamejs;
 }
+
+declare module "lamejs/lame.all.js?raw" {
+  const source: string;
+  export default source;
+}

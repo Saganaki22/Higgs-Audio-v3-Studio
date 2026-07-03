@@ -1,5 +1,4 @@
 import "./styles.css";
-import lamejs from "lamejs";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -122,6 +121,24 @@ type WavPcm = {
   channels: number;
   samples: Int16Array;
 };
+
+type LameJs = {
+  Mp3Encoder: new (channels: number, sampleRate: number, kbps: number) => {
+    encodeBuffer(left: Int16Array, right?: Int16Array): Int8Array;
+    flush(): Int8Array;
+  };
+};
+
+let lamejsPromise: Promise<LameJs> | null = null;
+
+function loadLameJs(): Promise<LameJs> {
+  if (!lamejsPromise) {
+    lamejsPromise = import("lamejs/lame.all.js?raw").then(({ default: source }) => (
+      new Function(`${source}\nreturn lamejs;`)() as LameJs
+    ));
+  }
+  return lamejsPromise;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOM helpers
@@ -282,7 +299,8 @@ function concatenateWavResults(results: GenerationResult[], pauseSeconds = 0): G
   };
 }
 
-function encodeMp3FromWav(base64: string): Uint8Array {
+async function encodeMp3FromWav(base64: string): Promise<Uint8Array> {
+  const lamejs = await loadLameJs();
   const wav = parseWavPcm(base64);
   const encoder = new lamejs.Mp3Encoder(wav.channels, wav.sampleRate, 128);
   const chunks: Int8Array[] = [];
@@ -2077,7 +2095,7 @@ function initAudioPlayer(): void {
       if (path) {
         const base64Audio = format === "wav"
           ? lastResult.wavBase64
-          : bytesToBase64(encodeMp3FromWav(lastResult.wavBase64));
+          : bytesToBase64(await encodeMp3FromWav(lastResult.wavBase64));
         await invoke("save_binary_file", { path, base64Data: base64Audio });
         showToast(`Saved ${format.toUpperCase()} file`);
       }
