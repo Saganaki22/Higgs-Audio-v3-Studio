@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
+#include <cstdlib>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -36,8 +38,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 namespace modules = engine::modules;
 
-constexpr ggml_type kDecodeKVCacheType = GGML_TYPE_F32;
-constexpr uint64_t kDecodeKVCacheDTypeBytes = sizeof(float);
+constexpr ggml_type kDefaultDecodeKVCacheType = GGML_TYPE_F32;
 
 struct GgmlContextDeleter {
     void operator()(ggml_context * ctx) const noexcept {
@@ -103,6 +104,12 @@ struct PromptReferenceInfo {
     int64_t tokens = 0;
 };
 
+struct DecodeKVCacheTypes {
+    ggml_type key = kDefaultDecodeKVCacheType;
+    ggml_type value = kDefaultDecodeKVCacheType;
+    std::string label = "f32";
+};
+
 int64_t head_dim(const HiggsTTSConfig & config) {
     if (config.text.num_attention_heads <= 0 || config.text.num_key_value_heads <= 0 || config.text.head_dim <= 0) {
         throw std::runtime_error("Higgs TTS attention config is invalid");
@@ -114,17 +121,72 @@ int64_t modality_vocab_size(const HiggsTTSConfig & config) {
     return config.audio_encoder.num_codebooks * config.audio_encoder.vocab_size;
 }
 
-uint64_t estimate_decode_kv_cache_bytes(const HiggsTTSConfig & config, int64_t cache_steps) {
+uint64_t dtype_bytes(ggml_type type) {
+    switch (type) {
+    case GGML_TYPE_F16:
+        return sizeof(ggml_fp16_t);
+    case GGML_TYPE_F32:
+        return sizeof(float);
+    default:
+        throw std::runtime_error("unsupported Higgs TTS decode KV cache dtype");
+    }
+}
+
+const char * dtype_name(ggml_type type) {
+    switch (type) {
+    case GGML_TYPE_F16:
+        return "f16";
+    case GGML_TYPE_F32:
+        return "f32";
+    default:
+        return "unknown";
+    }
+}
+
+DecodeKVCacheTypes resolve_decode_kv_cache_types() {
+    const char * raw_mode = std::getenv("HIGGS_TTS_DECODE_KV_CACHE");
+    std::string mode = raw_mode == nullptr ? "" : raw_mode;
+    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    std::replace(mode.begin(), mode.end(), '_', '-');
+
+    DecodeKVCacheTypes types;
+    if (mode.empty() || mode == "f32") {
+        return types;
+    }
+    if (mode == "f16" || mode == "both-f16") {
+        types.key = GGML_TYPE_F16;
+        types.value = GGML_TYPE_F16;
+        types.label = "f16";
+        return types;
+    }
+    if (mode == "k-f16" || mode == "key-f16") {
+        types.key = GGML_TYPE_F16;
+        types.value = GGML_TYPE_F32;
+        types.label = "k-f16-v-f32";
+        return types;
+    }
+    if (mode == "v-f16" || mode == "value-f16") {
+        types.key = GGML_TYPE_F32;
+        types.value = GGML_TYPE_F16;
+        types.label = "k-f32-v-f16";
+        return types;
+    }
+
+    debug::trace_log_scalar("higgs_tts.generator.decode_cache_env_invalid", mode);
+    return types;
+}
+
+uint64_t estimate_decode_kv_cache_bytes(const HiggsTTSConfig & config, int64_t cache_steps, const DecodeKVCacheTypes & cache_types) {
     if (cache_steps <= 0) {
         return 0;
     }
-    const uint64_t keys_and_values = 2;
-    return keys_and_values *
-           static_cast<uint64_t>(config.text.num_hidden_layers) *
+    return static_cast<uint64_t>(config.text.num_hidden_layers) *
            static_cast<uint64_t>(config.text.num_key_value_heads) *
            static_cast<uint64_t>(head_dim(config)) *
            static_cast<uint64_t>(cache_steps) *
-           kDecodeKVCacheDTypeBytes;
+           (dtype_bytes(cache_types.key) + dtype_bytes(cache_types.value));
 }
 
 core::TensorValue reshape_heads(
@@ -891,9 +953,11 @@ public:
     DecodeGraph(
         std::shared_ptr<HiggsTTSGeneratorWeightsRuntime> runtime,
         int64_t cache_steps,
-        size_t graph_arena_bytes)
+        size_t graph_arena_bytes,
+        DecodeKVCacheTypes cache_types)
         : runtime_(std::move(runtime)),
-          cache_steps_(cache_steps) {
+          cache_steps_(cache_steps),
+          cache_types_(std::move(cache_types)) {
         if (cache_steps_ <= 0) {
             throw std::runtime_error("Higgs TTS generator decode requires positive cache length");
         }
@@ -924,11 +988,11 @@ public:
         for (const auto & layer : weights.layers) {
             cache_keys.push_back(core::make_tensor(
                 ctx,
-                kDecodeKVCacheType,
+                cache_types_.key,
                 core::TensorShape::from_dims({1, cache_steps_, config.text.num_key_value_heads, dim})));
             cache_values.push_back(core::make_tensor(
                 ctx,
-                kDecodeKVCacheType,
+                cache_types_.value,
                 core::TensorShape::from_dims({1, cache_steps_, config.text.num_key_value_heads, dim})));
             auto out = decoder_layer_with_static_cache(
                 ctx,
@@ -960,7 +1024,9 @@ public:
         attention_mask_values_.assign(static_cast<size_t>(cache_steps_), ggml_fp32_to_fp16(-INFINITY));
         debug::timing_log_scalar("higgs_tts.generator.decode.graph.build_ms", engine::debug::elapsed_ms(build_start, Clock::now()));
         debug::trace_log_scalar("higgs_tts.generator.decode_cache_steps", cache_steps_);
-        debug::trace_log_scalar("higgs_tts.generator.decode_cache_dtype", "f32");
+        debug::trace_log_scalar("higgs_tts.generator.decode_cache_dtype", cache_types_.label);
+        debug::trace_log_scalar("higgs_tts.generator.decode_cache_key_dtype", dtype_name(cache_types_.key));
+        debug::trace_log_scalar("higgs_tts.generator.decode_cache_value_dtype", dtype_name(cache_types_.value));
     }
 
     ~DecodeGraph() {
@@ -970,8 +1036,14 @@ public:
         }
     }
 
-    bool can_run(const HiggsTTSGeneratorWeightsRuntime & runtime, int64_t required_steps) const {
-        return runtime_.get() == &runtime && cache_steps_ >= required_steps;
+    bool can_run(
+        const HiggsTTSGeneratorWeightsRuntime & runtime,
+        int64_t required_steps,
+        const DecodeKVCacheTypes & cache_types) const {
+        return runtime_.get() == &runtime &&
+               cache_steps_ >= required_steps &&
+               cache_types_.key == cache_types.key &&
+               cache_types_.value == cache_types.value;
     }
 
     void import_state(const runtime::TransformerKVState & state) {
@@ -1037,6 +1109,7 @@ public:
 private:
     std::shared_ptr<HiggsTTSGeneratorWeightsRuntime> runtime_;
     int64_t cache_steps_ = 0;
+    DecodeKVCacheTypes cache_types_;
     std::unique_ptr<ggml_context, GgmlContextDeleter> ctx_;
     ggml_tensor * offset_code_ids_ = nullptr;
     ggml_tensor * positions_ = nullptr;
@@ -1113,14 +1186,17 @@ struct HiggsTTSGeneratorRuntime::Impl {
         debug::timing_log_scalar("higgs_tts.generator.prefill_total_ms", engine::debug::elapsed_ms(timing_start, Clock::now()));
         prefill_graph.reset();
         const int64_t required_cache_steps = prompt_steps + options.max_tokens;
-        const auto estimated_kv_bytes = estimate_decode_kv_cache_bytes(config, required_cache_steps);
+        const auto cache_types = resolve_decode_kv_cache_types();
+        const auto estimated_kv_bytes = estimate_decode_kv_cache_bytes(config, required_cache_steps, cache_types);
         debug::trace_log_scalar("higgs_tts.generator.decode_kv_estimated_bytes", estimated_kv_bytes);
         debug::trace_log_scalar("higgs_tts.generator.decode_kv_estimated_mib", estimated_kv_bytes / (1024ull * 1024ull));
-        if (decode_graph == nullptr || !decode_graph->can_run(*weights, required_cache_steps)) {
-            decode_graph = std::make_unique<DecodeGraph>(weights, required_cache_steps, decode_graph_arena_bytes);
+        debug::trace_log_scalar("higgs_tts.generator.decode_cache_requested_dtype", cache_types.label);
+        if (decode_graph == nullptr || !decode_graph->can_run(*weights, required_cache_steps, cache_types)) {
+            decode_graph = std::make_unique<DecodeGraph>(weights, required_cache_steps, decode_graph_arena_bytes, cache_types);
         } else {
             debug::timing_log_scalar("higgs_tts.generator.decode.graph.build_ms", 0.0);
             debug::trace_log_scalar("higgs_tts.generator.decode_cache_steps", required_cache_steps);
+            debug::trace_log_scalar("higgs_tts.generator.decode_cache_dtype", cache_types.label);
         }
         decode_graph->import_state(prefill.kv_state);
         decode_graph->reset_timing();
