@@ -286,6 +286,9 @@ audiocpp_status run_generation_streaming(
                     static_cast<int32_t>(std::min<int64_t>(total, std::numeric_limits<int32_t>::max())),
                     phase);
                 return !is_cancelled(state);
+            },
+            [&]() {
+                return !is_cancelled(state);
             });
     } catch (...) {
         state.last_error = capture_exception_message();
@@ -779,7 +782,7 @@ AUDIOCPP_API const char * audiocpp_last_error(const audiocpp_engine * handle) {
 }
 
 AUDIOCPP_API const char * audiocpp_version(void) {
-    return "0.2.0";
+    return "0.2.3";
 }
 
 AUDIOCPP_API audiocpp_status audiocpp_transcribe(

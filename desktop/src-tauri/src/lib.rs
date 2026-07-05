@@ -634,6 +634,9 @@ fn cancel_generation(state: State<'_, AppState>) -> Result<(), String> {
 fn build_progress(app: &AppHandle) -> ProgressCallback {
     let app = app.clone();
     Arc::new(move |current: i32, total: i32, phase: &str| {
+        if emit_native_diagnostic(&app, phase) {
+            return;
+        }
         let _ = app.emit(
             "generation-progress",
             serde_json::json!({
@@ -1032,6 +1035,23 @@ fn emit_api_log(
     );
 }
 
+fn emit_native_diagnostic(app: &AppHandle, phase: &str) -> bool {
+    let Some(message) = phase.strip_prefix("diag:") else {
+        return false;
+    };
+    emit_api_log(
+        app,
+        "info",
+        "engine",
+        "VRAM",
+        "/native",
+        0,
+        0,
+        message.trim(),
+    );
+    true
+}
+
 fn http_reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
@@ -1285,6 +1305,9 @@ fn api_job_progress(
     let workflow = workflow.to_string();
     let label = label.to_string();
     Arc::new(move |current, total, phase| {
+        if emit_native_diagnostic(&app, phase) {
+            return;
+        }
         emit_studio_job(
             &app,
             &job_id,
@@ -1428,6 +1451,9 @@ fn api_stream_progress_callback(
     let workflow = workflow.to_string();
     let label = label.to_string();
     Arc::new(move |current, total, phase| {
+        if emit_native_diagnostic(&app, phase) {
+            return;
+        }
         let _ = write_ndjson_event(
             &writer,
             serde_json::json!({

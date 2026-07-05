@@ -36,6 +36,9 @@ namespace {
 using Clock = std::chrono::steady_clock;
 namespace modules = engine::modules;
 
+constexpr ggml_type kDecodeKVCacheType = GGML_TYPE_F32;
+constexpr uint64_t kDecodeKVCacheDTypeBytes = sizeof(float);
+
 struct GgmlContextDeleter {
     void operator()(ggml_context * ctx) const noexcept {
         if (ctx != nullptr) {
@@ -109,6 +112,19 @@ int64_t head_dim(const HiggsTTSConfig & config) {
 
 int64_t modality_vocab_size(const HiggsTTSConfig & config) {
     return config.audio_encoder.num_codebooks * config.audio_encoder.vocab_size;
+}
+
+uint64_t estimate_decode_kv_cache_bytes(const HiggsTTSConfig & config, int64_t cache_steps) {
+    if (cache_steps <= 0) {
+        return 0;
+    }
+    const uint64_t keys_and_values = 2;
+    return keys_and_values *
+           static_cast<uint64_t>(config.text.num_hidden_layers) *
+           static_cast<uint64_t>(config.text.num_key_value_heads) *
+           static_cast<uint64_t>(head_dim(config)) *
+           static_cast<uint64_t>(cache_steps) *
+           kDecodeKVCacheDTypeBytes;
 }
 
 core::TensorValue reshape_heads(
@@ -908,11 +924,11 @@ public:
         for (const auto & layer : weights.layers) {
             cache_keys.push_back(core::make_tensor(
                 ctx,
-                GGML_TYPE_F32,
+                kDecodeKVCacheType,
                 core::TensorShape::from_dims({1, cache_steps_, config.text.num_key_value_heads, dim})));
             cache_values.push_back(core::make_tensor(
                 ctx,
-                GGML_TYPE_F32,
+                kDecodeKVCacheType,
                 core::TensorShape::from_dims({1, cache_steps_, config.text.num_key_value_heads, dim})));
             auto out = decoder_layer_with_static_cache(
                 ctx,
@@ -944,6 +960,7 @@ public:
         attention_mask_values_.assign(static_cast<size_t>(cache_steps_), ggml_fp32_to_fp16(-INFINITY));
         debug::timing_log_scalar("higgs_tts.generator.decode.graph.build_ms", engine::debug::elapsed_ms(build_start, Clock::now()));
         debug::trace_log_scalar("higgs_tts.generator.decode_cache_steps", cache_steps_);
+        debug::trace_log_scalar("higgs_tts.generator.decode_cache_dtype", "f32");
     }
 
     ~DecodeGraph() {
@@ -1058,7 +1075,8 @@ struct HiggsTTSGeneratorRuntime::Impl {
         const HiggsTTSPrompt & prompt,
         const HiggsTTSGenerationOptions & options,
         const HiggsAudioCodeMatrix * reference_delayed_codes,
-        const HiggsTTSCodeStreamCallback * code_stream) {
+        const HiggsTTSCodeStreamCallback * code_stream,
+        const HiggsTTSCancelCallback * should_continue) {
         const auto & config = weights->assets().config;
         if (prompt.input_ids.empty()) {
             throw std::runtime_error("Higgs TTS generator prompt is empty");
@@ -1073,6 +1091,9 @@ struct HiggsTTSGeneratorRuntime::Impl {
             throw std::runtime_error("Higgs TTS top_p must be in [0, 1]");
         }
         const int64_t prompt_steps = static_cast<int64_t>(prompt.input_ids.size());
+        if (should_continue != nullptr && !(*should_continue)()) {
+            throw std::runtime_error("generation cancelled");
+        }
         if (prompt_steps + options.max_tokens > config.text.max_position_embeddings) {
             throw std::runtime_error("Higgs TTS request exceeds max_position_embeddings");
         }
@@ -1092,6 +1113,9 @@ struct HiggsTTSGeneratorRuntime::Impl {
         debug::timing_log_scalar("higgs_tts.generator.prefill_total_ms", engine::debug::elapsed_ms(timing_start, Clock::now()));
         prefill_graph.reset();
         const int64_t required_cache_steps = prompt_steps + options.max_tokens;
+        const auto estimated_kv_bytes = estimate_decode_kv_cache_bytes(config, required_cache_steps);
+        debug::trace_log_scalar("higgs_tts.generator.decode_kv_estimated_bytes", estimated_kv_bytes);
+        debug::trace_log_scalar("higgs_tts.generator.decode_kv_estimated_mib", estimated_kv_bytes / (1024ull * 1024ull));
         if (decode_graph == nullptr || !decode_graph->can_run(*weights, required_cache_steps)) {
             decode_graph = std::make_unique<DecodeGraph>(weights, required_cache_steps, decode_graph_arena_bytes);
         } else {
@@ -1113,6 +1137,9 @@ struct HiggsTTSGeneratorRuntime::Impl {
         double decode_step_ms = 0.0;
         timing_start = Clock::now();
         for (int64_t step = 0; step < options.max_tokens; ++step) {
+            if (should_continue != nullptr && !(*should_continue)()) {
+                throw std::runtime_error("generation cancelled");
+            }
             const auto sampling_start = Clock::now();
             const auto codes = sample_higgs_step(logits, sampler, config, options, rng, scratch);
             sampling_ms += engine::debug::elapsed_ms(sampling_start, Clock::now());
@@ -1134,6 +1161,9 @@ struct HiggsTTSGeneratorRuntime::Impl {
             const auto step_start = Clock::now();
             decode_graph->run_step_into(sampler.last_codes, logits);
             decode_step_ms += engine::debug::elapsed_ms(step_start, Clock::now());
+            if (should_continue != nullptr && !(*should_continue)()) {
+                throw std::runtime_error("generation cancelled");
+            }
         }
         debug::trace_log_scalar("higgs_tts.generator.stopped_by_eoc", sampler.generation_done);
         debug::trace_log_scalar("higgs_tts.generator.hit_max_tokens", !sampler.generation_done);
@@ -1155,6 +1185,11 @@ struct HiggsTTSGeneratorRuntime::Impl {
         out.raw_codes = reverse_delay_pattern(out.delayed_codes);
         debug::trace_log_scalar("higgs_tts.generator.raw_frames", out.raw_codes.frames);
         return out;
+    }
+
+    void release_runtime_cache() {
+        prefill_graph.reset();
+        decode_graph.reset();
     }
 
     std::shared_ptr<HiggsTTSGeneratorWeightsRuntime> weights;
@@ -1185,8 +1220,13 @@ HiggsTTSGeneratedCodes HiggsTTSGeneratorRuntime::generate(
     const HiggsTTSPrompt & prompt,
     const HiggsTTSGenerationOptions & options,
     const HiggsAudioCodeMatrix * reference_delayed_codes,
-    const HiggsTTSCodeStreamCallback * code_stream) {
-    return impl_->generate(prompt, options, reference_delayed_codes, code_stream);
+    const HiggsTTSCodeStreamCallback * code_stream,
+    const HiggsTTSCancelCallback * should_continue) {
+    return impl_->generate(prompt, options, reference_delayed_codes, code_stream, should_continue);
+}
+
+void HiggsTTSGeneratorRuntime::release_runtime_cache() {
+    impl_->release_runtime_cache();
 }
 
 

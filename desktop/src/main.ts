@@ -494,7 +494,7 @@ async function openExternalUrl(url: string): Promise<void> {
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 
-const APP_VERSION = "0.2.1";
+const APP_VERSION = "0.2.3";
 const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 const RELEASES_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases";
 const HIGGS_MODEL_RESOLVE_BASE = "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main";
@@ -1032,7 +1032,7 @@ speech = requests.post(
         "input": "Hello from the Higgs Studio API.",
         "voice": "default",
         "response_format": "mp3",
-        "max_tokens": 2048,
+        "max_tokens": 1024,
         "temperature": 1.0,
         "top_p": 0.95,
         "top_k": 50,
@@ -1052,7 +1052,7 @@ speaker = requests.post(
         "input": "This uses a saved speaker identity.",
         "voice": "${speakerVoice}",
         "response_format": "wav",
-        "max_tokens": 2048,
+        "max_tokens": 1024,
     },
     timeout=600,
 )
@@ -1068,7 +1068,7 @@ clone = requests.post(
         "reference_audio_path": r"C:\\voices\\speaker.wav",
         "reference_text": "Optional transcript of the reference audio.",
         "response_format": "wav",
-        "max_tokens": 2048,
+        "max_tokens": 1024,
     },
     timeout=600,
 )
@@ -1083,7 +1083,7 @@ continued = requests.post(
         "audio_path": r"C:\\voices\\start.wav",
         "continuation_text": "and this is the continuation.",
         "response_format": "wav",
-        "max_tokens": 2048,
+        "max_tokens": 1024,
     },
     timeout=600,
 )
@@ -1099,7 +1099,7 @@ with requests.post(
         "input": "This starts returning audio chunks before the final WAV is ready.",
         "voice": "default",
         "response_format": "wav",
-        "max_tokens": 2048,
+        "max_tokens": 1024,
     },
     stream=True,
     timeout=600,
@@ -1145,7 +1145,7 @@ const speech = await fetch(\`\${BASE_URL}/audio/speech\`, {
     input: "Hello from the Higgs Studio API.",
     voice: "default", // Or "${speakerVoice}" for a saved speaker identity.
     response_format: "mp3",
-    max_tokens: 2048,
+    max_tokens: 1024,
     temperature: 1.0,
     top_p: 0.95,
     top_k: 50,
@@ -1163,7 +1163,7 @@ const savedSpeaker = await fetch(\`\${BASE_URL}/audio/speech\`, {
     input: "This uses a saved speaker identity.",
     voice: "${speakerVoice}",
     response_format: "wav",
-    max_tokens: 2048,
+    max_tokens: 1024,
   }),
 });
 if (!savedSpeaker.ok) throw new Error(await savedSpeaker.text());
@@ -1177,7 +1177,7 @@ const clone = await fetch(\`\${BASE_URL}/higgs/voice-clone\`, {
     reference_audio_path: "C:\\\\voices\\\\speaker.wav",
     reference_text: "Optional transcript of the reference audio.",
     response_format: "wav",
-    max_tokens: 2048,
+    max_tokens: 1024,
   }),
 });
 if (!clone.ok) throw new Error(await clone.text());
@@ -1190,7 +1190,7 @@ const continued = await fetch(\`\${BASE_URL}/higgs/continue-speech\`, {
     audio_path: "C:\\\\voices\\\\start.wav",
     continuation_text: "and this is the continuation.",
     response_format: "wav",
-    max_tokens: 2048,
+    max_tokens: 1024,
   }),
 });
 if (!continued.ok) throw new Error(await continued.text());
@@ -1203,7 +1203,7 @@ const streamed = await fetch(\`\${BASE_URL}/higgs/audio/stream\`, {
     input: "This streams progress and wav-base64 chunks.",
     voice: "default",
     response_format: "wav",
-    max_tokens: 2048,
+    max_tokens: 1024,
   }),
 });
 if (!streamed.ok || !streamed.body) throw new Error(await streamed.text());
@@ -1249,7 +1249,7 @@ $SpeechBody = @{
   input = "Hello from the Higgs Studio API."
   voice = "default"
   response_format = "mp3"
-  max_tokens = 2048
+  max_tokens = 1024
   temperature = 1.0
   top_p = 0.95
   top_k = 50
@@ -1263,7 +1263,7 @@ $SpeakerBody = @{
   input = "This uses a saved speaker identity."
   voice = "${speakerVoice}"
   response_format = "wav"
-  max_tokens = 2048
+  max_tokens = 1024
 } | ConvertTo-Json
 Invoke-WebRequest -Uri "$BaseUrl/audio/speech" -Method Post -Headers $Headers -Body $SpeakerBody -OutFile "speaker.wav"
 
@@ -1273,7 +1273,7 @@ $CloneBody = @{
   reference_audio_path = "C:\\voices\\speaker.wav"
   reference_text = "Optional transcript of the reference audio."
   response_format = "wav"
-  max_tokens = 2048
+  max_tokens = 1024
 } | ConvertTo-Json
 Invoke-WebRequest -Uri "$BaseUrl/higgs/voice-clone" -Method Post -Headers $Headers -Body $CloneBody -OutFile "clone.wav"
 
@@ -1282,7 +1282,7 @@ $ContinueBody = @{
   audio_path = "C:\\voices\\start.wav"
   continuation_text = "and this is the continuation."
   response_format = "wav"
-  max_tokens = 2048
+  max_tokens = 1024
 } | ConvertTo-Json
 Invoke-WebRequest -Uri "$BaseUrl/higgs/continue-speech" -Method Post -Headers $Headers -Body $ContinueBody -OutFile "continued.wav"
 
@@ -1292,7 +1292,7 @@ $StreamBody = @{
   input = "This streams progress and wav-base64 chunks."
   voice = "default"
   response_format = "wav"
-  max_tokens = 2048
+  max_tokens = 1024
 } | ConvertTo-Json
 curl.exe -N -X POST "$BaseUrl/higgs/audio/stream" \`
   -H "Authorization: Bearer $ApiKey" \`
@@ -1319,28 +1319,28 @@ curl "${base}/higgs/speakers" \\
 curl -X POST "${base}/audio/speech" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"current","input":"Hello from the Higgs Studio API.","voice":"default","response_format":"mp3","max_tokens":2048,"temperature":1.0,"top_p":0.95,"top_k":50,"seed":1234}' \\
+  -d '{"model":"current","input":"Hello from the Higgs Studio API.","voice":"default","response_format":"mp3","max_tokens":1024,"temperature":1.0,"top_p":0.95,"top_k":50,"seed":1234}' \\
   --output speech.mp3
 
 # Saved speaker identity clone through the OpenAI-style route.
 curl -X POST "${base}/audio/speech" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"current","input":"This uses a saved speaker identity.","voice":"${speakerVoice}","response_format":"wav","max_tokens":2048}' \\
+  -d '{"model":"current","input":"This uses a saved speaker identity.","voice":"${speakerVoice}","response_format":"wav","max_tokens":1024}' \\
   --output speaker.wav
 
 # Voice clone.
 curl -X POST "${base}/higgs/voice-clone" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"input":"This uses the reference speaker.","reference_audio_path":"C:\\\\voices\\\\speaker.wav","reference_text":"Optional transcript of the reference audio.","response_format":"wav","max_tokens":2048}' \\
+  -d '{"input":"This uses the reference speaker.","reference_audio_path":"C:\\\\voices\\\\speaker.wav","reference_text":"Optional transcript of the reference audio.","response_format":"wav","max_tokens":1024}' \\
   --output clone.wav
 
 # Continue speech.
 curl -X POST "${base}/higgs/continue-speech" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"audio_path":"C:\\\\voices\\\\start.wav","continuation_text":"and this is the continuation.","response_format":"wav","max_tokens":2048}' \\
+  -d '{"audio_path":"C:\\\\voices\\\\start.wav","continuation_text":"and this is the continuation.","response_format":"wav","max_tokens":1024}' \\
   --output continued.wav
 
 # Streaming TTS as newline-delimited JSON events. Audio events include wavBase64 chunks
@@ -1348,7 +1348,7 @@ curl -X POST "${base}/higgs/continue-speech" \\
 curl -N -X POST "${base}/higgs/audio/stream" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"input":"This streams progress and wav-base64 chunks.","voice":"default","response_format":"wav","max_tokens":2048}'
+  -d '{"input":"This streams progress and wav-base64 chunks.","voice":"default","response_format":"wav","max_tokens":1024}'
 
 # Cancel the active job if needed.
 curl -X POST "${base}/higgs/cancel" \\
@@ -3987,6 +3987,15 @@ function generationStepForPhase(phase: string): number {
   return 0;
 }
 
+function generationElapsedLabel(prefix = "Elapsed"): string {
+  const elapsed = genStartedAt > 0 ? ((performance.now() - genStartedAt) / 1000).toFixed(1) : "0.0";
+  return `${prefix} ${elapsed}s`;
+}
+
+function setGenerationElapsedLabel(prefix = "Elapsed"): void {
+  setText("#gen-progress-text", generationElapsedLabel(prefix));
+}
+
 function beginGeneration(job: GenerationJob): void {
   isGenerating = true;
   cancelRequested = false;
@@ -3997,12 +4006,7 @@ function beginGeneration(job: GenerationJob): void {
   if (genTimer) clearInterval(genTimer);
   genTimer = window.setInterval(() => {
     if (!isGenerating || !activeGenerationJob) return;
-    const elapsed = ((performance.now() - genStartedAt) / 1000).toFixed(1);
-    const text = el<HTMLElement>("#gen-progress-text").textContent || "";
-    if (!text.toLowerCase().includes("complete") && !text.toLowerCase().includes("cancel")) {
-      const base = text.split(" | ")[0] || `Generating ${modeLabel(activeGenerationJob.mode)}`;
-      setText("#gen-progress-text", `${base} | ${elapsed}s`);
-    }
+    setGenerationElapsedLabel();
   }, 350);
   const cancelBtn = el<HTMLButtonElement>("#cancel-btn");
   cancelBtn.disabled = false;
@@ -4012,8 +4016,8 @@ function beginGeneration(job: GenerationJob): void {
   const bar = el<HTMLElement>("#gen-progress-bar");
   bar.classList.add("indeterminate");
   bar.style.width = "";
-  renderGenerationSteps(["Prepare", "Reference", "Generate", "Decode", "Output"], 0);
-  setText("#gen-progress-text", `Preparing ${modeLabel(job.mode)}...`);
+  renderGenerationSteps([]);
+  setGenerationElapsedLabel();
   renderQueuePanel();
 }
 
@@ -4031,9 +4035,8 @@ function finishGeneration(success: boolean, message: string, tone?: "success" | 
   bar.classList.remove("indeterminate");
   if (success) {
     setProgress("#gen-progress-bar", 1, 1);
-    const labels = currentProgressLabels.length ? currentProgressLabels : ["Prepare", "Reference", "Generate", "Decode", "Output"];
-    renderGenerationSteps(labels, labels.length - 1, labels.length - 1);
-    setText("#gen-progress-text", "Complete");
+    renderGenerationSteps([]);
+    setGenerationElapsedLabel("Complete in");
   }
   el<HTMLElement>("#progress-section").classList.add("hidden");
   activeGenerationJob = null;
@@ -4097,19 +4100,14 @@ async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "
     }
   }
 
-  const labels = lines.map((line, index) => {
-    const speaker = speakers.find((item) => item.id === line.speakerId);
-    return `${index + 1}. ${speaker?.name || "Speaker"}`;
-  });
-  renderGenerationSteps(labels, 0);
+  renderGenerationSteps([]);
 
   const outputs: GenerationResult[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    updateGenerationStep(i, i - 1);
     setProgress("#gen-progress-bar", i, lines.length);
     const resolved = await resolveMultiLineReference(line, speakers, lines);
-    setText("#gen-progress-text", `Line ${i + 1}/${lines.length}: ${resolved.speakerName}`);
+    setGenerationElapsedLabel(`Line ${i + 1}/${lines.length} ·`);
     const perLineOptions: Record<string, number | string | boolean> = { ...lineOptions, normalize_reference: resolved.normalize };
     if (resolved.cachePath) perLineOptions.reference_cache_path = resolved.cachePath;
     const result = await invoke<GenerationResult>("generate_voice_clone", {
@@ -4166,8 +4164,7 @@ async function generateJobAudio(job: GenerationJob): Promise<GenerationResult> {
       },
     });
     if (payload.includeSource) {
-      updateGenerationStep(2, 1);
-      setText("#gen-progress-text", "Combining source audio and continuation");
+      setGenerationElapsedLabel();
       const source = await invoke<GenerationResult>("read_audio_as_wav", {
         audioPath: payload.refPath,
         targetSampleRate: result.sampleRate,
@@ -4189,11 +4186,10 @@ async function runGenerationJob(job: GenerationJob): Promise<void> {
       finishGeneration(false, "Generation cancelled", "warning");
       return;
     }
-    updateGenerationStep(2, 1);
-    setText("#gen-progress-text", "Processing audio output");
+    setGenerationElapsedLabel();
     lastResult = result;
     showOutput(result, job.mode);
-    updateGenerationStep(3, 2);
+    setGenerationElapsedLabel();
     addHistory(job.mode, job.label || "Untitled", result);
     finishGeneration(true, "Generation complete");
     advanceSeedAfterGeneration();
@@ -4236,7 +4232,7 @@ async function doCancel(): Promise<void> {
   const cancelBtn = el<HTMLButtonElement>("#cancel-btn");
   cancelBtn.disabled = true;
   cancelBtn.textContent = "Cancelling...";
-  setText("#gen-progress-text", "Cancelling generation...");
+  setGenerationElapsedLabel("Cancelling ·");
   try {
     await invoke("cancel_generation");
   } catch (e) {
@@ -4372,7 +4368,7 @@ function scheduleLiveAudioChunk(event: GenerationAudioChunkEvent): void {
     if (!liveStream.sampleRate || !liveStream.channels) {
       liveStream.sampleRate = pcm.sampleRate;
       liveStream.channels = pcm.channels;
-      setText("#gen-progress-text", "First audio streaming...");
+      setGenerationElapsedLabel();
     }
     if (liveStream.sampleRate !== pcm.sampleRate || liveStream.channels !== pcm.channels) return;
     const hintedStart = Number.isFinite(event.startSample) && event.startSample >= 0
@@ -5348,14 +5344,6 @@ async function initEventListeners(): Promise<void> {
   await listen<ProgressEvent>("generation-progress", (event) => {
     const p = event.payload;
     const bar = el<HTMLElement>("#gen-progress-bar");
-    if (activeGenerationJob?.mode === "multi" && currentProgressLabels.length > 0) {
-      bar.classList.remove("indeterminate");
-      const completeCount = document.querySelectorAll("#gen-progress-steps .progress-step.complete").length;
-      const active = Math.max(0, Math.min(currentProgressLabels.length - 1, completeCount));
-      setText("#gen-progress-text", `${currentProgressLabels[active] || "Line"} · ${p.phase}`);
-      return;
-    }
-
     const phase = p.phase.toLowerCase();
     const step = generationStepForPhase(phase);
     updateGenerationStep(step, step - 1);
@@ -5365,8 +5353,7 @@ async function initEventListeners(): Promise<void> {
     } else {
       bar.classList.add("indeterminate");
     }
-    const elapsed = genStartedAt > 0 ? ` | ${((performance.now() - genStartedAt) / 1000).toFixed(1)}s` : "";
-    setText("#gen-progress-text", `${p.phase || currentProgressLabels[step] || "Generating"}${elapsed}`);
+    setGenerationElapsedLabel();
   });
 
   await listen<GenerationAudioChunkEvent>("generation-audio-chunk", (event) => {

@@ -28,6 +28,7 @@ struct HiggsTTSGeneratedCodes {
 };
 
 using HiggsTTSCodeStreamCallback = std::function<bool(const HiggsAudioCodeMatrix & delayed_codes, bool is_final)>;
+using HiggsTTSCancelCallback = std::function<bool()>;
 
 class HiggsTTSGeneratorRuntime {
 public:
@@ -46,7 +47,9 @@ public:
         const HiggsTTSPrompt & prompt,
         const HiggsTTSGenerationOptions & options,
         const HiggsAudioCodeMatrix * reference_delayed_codes = nullptr,
-        const HiggsTTSCodeStreamCallback * code_stream = nullptr);
+        const HiggsTTSCodeStreamCallback * code_stream = nullptr,
+        const HiggsTTSCancelCallback * should_continue = nullptr);
+    void release_runtime_cache();
 
 private:
     std::unique_ptr<Impl> impl_;

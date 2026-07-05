@@ -48,8 +48,11 @@ core::TensorValue FastKVSetRowsModule::build(
         core::TensorShape::from_dims({cache.shape.dims[0], 1, cache.shape.dims[2], cache.shape.dims[3]}),
         "row");
     core::validate_shape(row_index, core::TensorShape::from_dims({1}), "row_index");
-    if (cache.type != GGML_TYPE_F32 || row.type != GGML_TYPE_F32) {
-        throw std::runtime_error("FastKVSetRowsModule requires f32 cache and row tensors");
+    if (cache.type != GGML_TYPE_F32 && cache.type != GGML_TYPE_F16) {
+        throw std::runtime_error("FastKVSetRowsModule requires an f32 or f16 cache tensor");
+    }
+    if (row.type != GGML_TYPE_F32 && row.type != GGML_TYPE_F16) {
+        throw std::runtime_error("FastKVSetRowsModule requires an f32 or f16 row tensor");
     }
     if (row_index.type != GGML_TYPE_I32 && row_index.type != GGML_TYPE_I64) {
         throw std::runtime_error("FastKVSetRowsModule requires i32 or i64 row_index tensor");
@@ -62,6 +65,13 @@ core::TensorValue FastKVSetRowsModule::build(
     const int64_t row_elems = cache.shape.dims[2] * cache.shape.dims[3];
     auto flat_cache = core::reshape_tensor(ctx, cache, core::TensorShape::from_dims({steps, row_elems}));
     auto contiguous_row = tensor_layout::ensure_contiguous_layout_if_needed(ctx, row);
+    if (contiguous_row.type != cache.type) {
+        contiguous_row = core::wrap_tensor(
+            ggml_cast(ctx.ggml, contiguous_row.tensor, cache.type),
+            contiguous_row.shape,
+            cache.type);
+        contiguous_row = tensor_layout::ensure_contiguous_layout_if_needed(ctx, contiguous_row);
+    }
     auto flat_row = core::reshape_tensor(ctx, contiguous_row, core::TensorShape::from_dims({1, row_elems}));
     ggml_tensor * updated = ggml_set_rows(ctx.ggml, flat_cache.tensor, flat_row.tensor, row_index.tensor);
     auto flat_updated = core::wrap_tensor(updated, flat_cache.shape, cache.type);

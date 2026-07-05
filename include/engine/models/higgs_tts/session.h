@@ -22,6 +22,7 @@ class HiggsTTSSession final
 public:
     using AudioStreamCallback = std::function<bool(const runtime::AudioBuffer &, int64_t, bool)>;
     using StreamProgressCallback = std::function<bool(int64_t, int64_t, const char *)>;
+    using CancelCallback = std::function<bool()>;
 
     HiggsTTSSession(
         const runtime::TaskSpec & task,
@@ -36,7 +37,8 @@ public:
     runtime::TaskResult run_streaming(
         const runtime::TaskRequest & request,
         const AudioStreamCallback & on_audio,
-        const StreamProgressCallback & on_progress);
+        const StreamProgressCallback & on_progress,
+        const CancelCallback & should_continue = {});
 
 private:
     runtime::AudioBuffer run_chunk(const runtime::TaskRequest & request);
@@ -44,7 +46,8 @@ private:
         const runtime::TaskRequest & request,
         const AudioStreamCallback & on_audio,
         const StreamProgressCallback & on_progress,
-        int64_t & output_start_sample);
+        int64_t & output_start_sample,
+        const CancelCallback & should_continue);
 
     runtime::TaskSpec task_;
     std::shared_ptr<const HiggsTTSAssets> assets_;

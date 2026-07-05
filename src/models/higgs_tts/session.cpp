@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -109,6 +110,38 @@ bool bool_option(
     }
     return runtime::parse_bool_option(*value, key);
 }
+
+class RuntimeCacheReleaseGuard {
+public:
+    RuntimeCacheReleaseGuard(
+        HiggsTTSGeneratorRuntime * generator,
+        HiggsAudioCodecDecoderRuntime * codec)
+        : generator_(generator), codec_(codec) {}
+
+    ~RuntimeCacheReleaseGuard() noexcept {
+        if (!active_) {
+            return;
+        }
+        if (codec_ != nullptr) {
+            codec_->release_runtime_cache();
+        }
+        if (generator_ != nullptr) {
+            generator_->release_runtime_cache();
+        }
+    }
+
+    RuntimeCacheReleaseGuard(const RuntimeCacheReleaseGuard &) = delete;
+    RuntimeCacheReleaseGuard & operator=(const RuntimeCacheReleaseGuard &) = delete;
+
+    void dismiss() noexcept {
+        active_ = false;
+    }
+
+private:
+    HiggsTTSGeneratorRuntime * generator_ = nullptr;
+    HiggsAudioCodecDecoderRuntime * codec_ = nullptr;
+    bool active_ = true;
+};
 
 struct ReferenceAudioKey {
     int sample_rate = 0;
@@ -261,6 +294,56 @@ void set_in_memory_reference_cache(
     has_cached_reference = true;
 }
 
+int64_t bytes_to_mib(int64_t bytes) {
+    return bytes / (1024 * 1024);
+}
+
+bool should_continue_generation(const HiggsTTSSession::CancelCallback & should_continue) {
+    return !should_continue || should_continue();
+}
+
+void require_generation_alive(const HiggsTTSSession::CancelCallback & should_continue) {
+    if (!should_continue_generation(should_continue)) {
+        throw std::runtime_error("generation cancelled");
+    }
+}
+
+bool emit_memory_diagnostic(
+    const core::ExecutionContext & execution,
+    const HiggsTTSSession::StreamProgressCallback & on_progress,
+    const char * stage) {
+    const auto snapshot = execution.memory_snapshot();
+    if (!snapshot.available) {
+        return true;
+    }
+    const auto used_mib = bytes_to_mib(snapshot.used_bytes);
+    const auto free_mib = bytes_to_mib(snapshot.free_bytes);
+    const auto total_mib = bytes_to_mib(snapshot.total_bytes);
+    const std::string metric_prefix = std::string("higgs_tts.vram.") + stage;
+    engine::debug::trace_log_scalar(metric_prefix + ".used_mib", used_mib);
+    engine::debug::trace_log_scalar(metric_prefix + ".free_mib", free_mib);
+    engine::debug::trace_log_scalar(metric_prefix + ".total_mib", total_mib);
+    if (!on_progress) {
+        return true;
+    }
+    std::ostringstream phase;
+    phase << "diag:vram stage=" << stage
+          << " used=" << used_mib << "MiB"
+          << " free=" << free_mib << "MiB"
+          << " total=" << total_mib << "MiB";
+    const auto phase_text = phase.str();
+    return on_progress(0, 0, phase_text.c_str());
+}
+
+void require_memory_diagnostic_sent(
+    const core::ExecutionContext & execution,
+    const HiggsTTSSession::StreamProgressCallback & on_progress,
+    const char * stage) {
+    if (!emit_memory_diagnostic(execution, on_progress, stage)) {
+        throw std::runtime_error("generation cancelled");
+    }
+}
+
 }  // namespace
 
 HiggsTTSSession::HiggsTTSSession(
@@ -361,7 +444,8 @@ runtime::TaskResult HiggsTTSSession::run(const runtime::TaskRequest & request) {
 runtime::TaskResult HiggsTTSSession::run_streaming(
     const runtime::TaskRequest & request,
     const AudioStreamCallback & on_audio,
-    const StreamProgressCallback & on_progress) {
+    const StreamProgressCallback & on_progress,
+    const CancelCallback & should_continue) {
     const auto wall_start = Clock::now();
     require_prepared("Higgs TTS streaming run");
     if (!request.text_input.has_value() || request.text_input->text.empty()) {
@@ -374,12 +458,13 @@ runtime::TaskResult HiggsTTSSession::run_streaming(
     runtime::AudioBuffer merged_audio;
     int64_t output_start_sample = 0;
     for (const auto & chunk_request : chunk_requests) {
+        require_generation_alive(should_continue);
         if (!chunk_request.text_input.has_value() || chunk_request.text_input->text.empty()) {
             continue;
         }
         runtime::append_audio_buffer(
             merged_audio,
-            run_chunk_streaming(chunk_request, on_audio, on_progress, output_start_sample));
+            run_chunk_streaming(chunk_request, on_audio, on_progress, output_start_sample, should_continue));
     }
     engine::debug::timing_log_scalar("session.wall_ms", engine::debug::elapsed_ms(wall_start));
     runtime::TaskResult result;
@@ -388,6 +473,8 @@ runtime::TaskResult HiggsTTSSession::run_streaming(
 }
 
 runtime::AudioBuffer HiggsTTSSession::run_chunk(const runtime::TaskRequest & request) {
+    RuntimeCacheReleaseGuard runtime_cache_guard(generator_.get(), codec_decoder_.get());
+    const bool keep_runtime_cache = bool_option(request, "keep_runtime_cache", false);
     const std::string reference_text =
         request.options.count("reference_text") != 0 ? request.options.at("reference_text") : std::string{};
     const auto generation = generation_options_from_request(request);
@@ -436,6 +523,9 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk(const runtime::TaskRequest & req
         }
         if (!reference_delayed_codes.has_value()) {
             auto reference_raw_codes = codec_decoder_->encode_reference_audio(reference_audio);
+            if (!keep_runtime_cache) {
+                codec_decoder_->release_runtime_cache();
+            }
             reference_delayed_codes = apply_delay_pattern(reference_raw_codes);
             engine::debug::trace_log_scalar("higgs_tts.reference.raw_code_frames", reference_raw_codes.frames);
             engine::debug::trace_log_scalar("higgs_tts.reference.delayed_code_rows", reference_delayed_codes->frames);
@@ -466,10 +556,18 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk(const runtime::TaskRequest & req
         prompt,
         generation,
         reference_delayed_codes.has_value() ? &*reference_delayed_codes : nullptr);
+    if (!keep_runtime_cache) {
+        generator_->release_runtime_cache();
+    }
     engine::debug::trace_log_scalar("higgs_tts.delayed_code_rows", codes.delayed_codes.frames);
     engine::debug::trace_log_scalar("higgs_tts.raw_code_frames", codes.raw_codes.frames);
     auto audio = codec_decoder_->decode(codes.raw_codes);
-    codec_decoder_->release_runtime_cache();
+    if (!keep_runtime_cache) {
+        codec_decoder_->release_runtime_cache();
+    }
+    if (keep_runtime_cache) {
+        runtime_cache_guard.dismiss();
+    }
     return audio;
 }
 
@@ -477,7 +575,10 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
     const runtime::TaskRequest & request,
     const AudioStreamCallback & on_audio,
     const StreamProgressCallback & on_progress,
-    int64_t & output_start_sample) {
+    int64_t & output_start_sample,
+    const CancelCallback & should_continue) {
+    RuntimeCacheReleaseGuard runtime_cache_guard(generator_.get(), codec_decoder_.get());
+    const bool keep_runtime_cache = bool_option(request, "keep_runtime_cache", false);
     const std::string reference_text =
         request.options.count("reference_text") != 0 ? request.options.at("reference_text") : std::string{};
     const auto generation = generation_options_from_request(request);
@@ -498,6 +599,8 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
     engine::debug::trace_log_scalar("higgs_tts.streaming.first_frames", first_stream_frames);
     engine::debug::trace_log_scalar("higgs_tts.streaming.frames", stream_frames);
     engine::debug::trace_log_scalar("higgs_tts.streaming.emit_audio_chunks", emit_stream_audio ? 1 : 0);
+    require_memory_diagnostic_sent(execution_context(), on_progress, "chunk_start");
+    require_generation_alive(should_continue);
     std::optional<HiggsAudioCodeMatrix> reference_delayed_codes;
     if (request.voice.has_value() &&
         request.voice->speaker.has_value() &&
@@ -537,7 +640,14 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
             engine::debug::trace_log_scalar("higgs_tts.reference.cache_hit", 1);
         }
         if (!reference_delayed_codes.has_value()) {
+            require_memory_diagnostic_sent(execution_context(), on_progress, "before_reference_encode");
+            require_generation_alive(should_continue);
             auto reference_raw_codes = codec_decoder_->encode_reference_audio(reference_audio);
+            require_memory_diagnostic_sent(execution_context(), on_progress, "after_reference_encode");
+            if (!keep_runtime_cache) {
+                codec_decoder_->release_runtime_cache();
+                require_memory_diagnostic_sent(execution_context(), on_progress, "after_reference_codec_release");
+            }
             reference_delayed_codes = apply_delay_pattern(reference_raw_codes);
             engine::debug::trace_log_scalar("higgs_tts.reference.raw_code_frames", reference_raw_codes.frames);
             engine::debug::trace_log_scalar("higgs_tts.reference.delayed_code_rows", reference_delayed_codes->frames);
@@ -564,6 +674,8 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
         request.text_input->text,
         reference_delayed_codes.has_value() ? reference_delayed_codes->frames : 0,
         reference_text);
+    require_memory_diagnostic_sent(execution_context(), on_progress, "after_prompt_build");
+    require_generation_alive(should_continue);
 
     int64_t emitted_raw_frames = 0;
     int64_t emitted_samples = 0;
@@ -596,8 +708,29 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
             return true;
         }
 
+        if (!should_continue_generation(should_continue)) {
+            return false;
+        }
+        if (emitted_raw_frames == 0 || is_final) {
+            if (!emit_memory_diagnostic(execution_context(), on_progress, "before_stream_codec_decode")) {
+                return false;
+            }
+        }
         const auto raw_prefix = reverse_delay_pattern(delayed_codes);
         auto audio_prefix = codec_decoder_->decode(raw_prefix);
+        if (emitted_raw_frames == 0 || is_final) {
+            if (!emit_memory_diagnostic(execution_context(), on_progress, "after_stream_codec_decode")) {
+                return false;
+            }
+        }
+        if (!keep_runtime_cache) {
+            codec_decoder_->release_runtime_cache();
+            if (emitted_raw_frames == 0 || is_final) {
+                if (!emit_memory_diagnostic(execution_context(), on_progress, "after_stream_codec_release")) {
+                    return false;
+                }
+            }
+        }
         if (static_cast<int64_t>(audio_prefix.samples.size()) <= emitted_samples) {
             emitted_raw_frames = raw_prefix.frames;
             return true;
@@ -615,14 +748,27 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
         return keep_going;
     };
 
+    require_memory_diagnostic_sent(execution_context(), on_progress, "before_generator");
     const auto codes = generator_->generate(
         prompt,
         generation,
         reference_delayed_codes.has_value() ? &*reference_delayed_codes : nullptr,
-        &code_stream);
+        &code_stream,
+        &should_continue);
+    require_memory_diagnostic_sent(execution_context(), on_progress, "after_generator");
+    if (!keep_runtime_cache) {
+        generator_->release_runtime_cache();
+        require_memory_diagnostic_sent(execution_context(), on_progress, "after_generator_release");
+    }
     engine::debug::trace_log_scalar("higgs_tts.delayed_code_rows", codes.delayed_codes.frames);
     engine::debug::trace_log_scalar("higgs_tts.raw_code_frames", codes.raw_codes.frames);
+    require_memory_diagnostic_sent(execution_context(), on_progress, "before_final_codec_decode");
     auto audio = codec_decoder_->decode(codes.raw_codes);
+    require_memory_diagnostic_sent(execution_context(), on_progress, "after_final_codec_decode");
+    if (!keep_runtime_cache) {
+        codec_decoder_->release_runtime_cache();
+        require_memory_diagnostic_sent(execution_context(), on_progress, "after_final_codec_release");
+    }
     if (emit_stream_audio && static_cast<int64_t>(audio.samples.size()) > emitted_samples) {
         runtime::AudioBuffer chunk;
         chunk.sample_rate = audio.sample_rate;
@@ -633,7 +779,10 @@ runtime::AudioBuffer HiggsTTSSession::run_chunk_streaming(
         }
     }
     output_start_sample += static_cast<int64_t>(audio.samples.size());
-    codec_decoder_->release_runtime_cache();
+    if (keep_runtime_cache) {
+        runtime_cache_guard.dismiss();
+    }
+    require_memory_diagnostic_sent(execution_context(), on_progress, "chunk_end");
     return audio;
 }
 

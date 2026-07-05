@@ -4,9 +4,63 @@
 #include "engine/framework/debug/trace.h"
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 
 namespace engine::runtime {
+namespace {
+
+void write_cache_tensor(const core::TensorValue & tensor, const std::vector<float> & values) {
+    if (tensor.type == GGML_TYPE_F32) {
+        core::write_tensor_f32(tensor, values);
+        return;
+    }
+    if (tensor.type == GGML_TYPE_F16) {
+        core::write_tensor_f16(tensor, values);
+        return;
+    }
+    throw std::runtime_error("TransformerKVCache supports only f32 or f16 cache tensors");
+}
+
+std::vector<float> read_cache_tensor_f32(const ggml_tensor * tensor) {
+    if (tensor == nullptr) {
+        throw std::runtime_error("TransformerKVCache read received a null tensor");
+    }
+    if (tensor->type == GGML_TYPE_F32) {
+        return core::read_tensor_f32(tensor);
+    }
+    if (tensor->type != GGML_TYPE_F16) {
+        throw std::runtime_error("TransformerKVCache supports only f32 or f16 cache tensor reads");
+    }
+
+    const size_t element_count = static_cast<size_t>(ggml_nelements(tensor));
+    const size_t byte_count = static_cast<size_t>(ggml_nbytes(tensor));
+    std::vector<uint8_t> raw(byte_count);
+    ggml_backend_tensor_get(tensor, raw.data(), 0, raw.size());
+
+    std::vector<float> values(element_count);
+    size_t out_index = 0;
+    const char * base = reinterpret_cast<const char *>(raw.data());
+    for (int64_t i3 = 0; i3 < tensor->ne[3]; ++i3) {
+        for (int64_t i2 = 0; i2 < tensor->ne[2]; ++i2) {
+            for (int64_t i1 = 0; i1 < tensor->ne[1]; ++i1) {
+                for (int64_t i0 = 0; i0 < tensor->ne[0]; ++i0) {
+                    const char * ptr = base
+                        + i0 * tensor->nb[0]
+                        + i1 * tensor->nb[1]
+                        + i2 * tensor->nb[2]
+                        + i3 * tensor->nb[3];
+                    ggml_fp16_t value = 0;
+                    std::memcpy(&value, ptr, sizeof(value));
+                    values[out_index++] = ggml_fp16_to_fp32(value);
+                }
+            }
+        }
+    }
+    return values;
+}
+
+}  // namespace
 
 TransformerKVCache::TransformerKVCache(
     int64_t cache_steps,
@@ -67,8 +121,8 @@ void TransformerKVCache::import_state(const TransformerKVState & state) {
                 std::copy(source.key.begin(), source.key.end(), cache.import_key_scratch.begin());
                 std::copy(source.value.begin(), source.value.end(), cache.import_value_scratch.begin());
             }
-            core::write_tensor_f32(cache.key_tensor, cache.import_key_scratch);
-            core::write_tensor_f32(cache.value_tensor, cache.import_value_scratch);
+            write_cache_tensor(cache.key_tensor, cache.import_key_scratch);
+            write_cache_tensor(cache.value_tensor, cache.import_value_scratch);
         }
     }
 }
@@ -84,8 +138,8 @@ TransformerKVState TransformerKVCache::export_state() const {
         if (keep_elems == 0) {
             continue;
         }
-        const auto key_values = core::read_tensor_f32(layers_[layer].key_tensor.tensor);
-        const auto value_values = core::read_tensor_f32(layers_[layer].value_tensor.tensor);
+        const auto key_values = read_cache_tensor_f32(layers_[layer].key_tensor.tensor);
+        const auto value_values = read_cache_tensor_f32(layers_[layer].value_tensor.tensor);
         out.key.assign(key_values.begin(), key_values.begin() + static_cast<ptrdiff_t>(keep_elems));
         out.value.assign(value_values.begin(), value_values.begin() + static_cast<ptrdiff_t>(keep_elems));
     }
@@ -140,11 +194,11 @@ void TransformerKVCache::trace_log_state(const std::string & name, int64_t num_h
         return;
     }
     const size_t keep_elems = static_cast<size_t>(valid_steps_ * step_elems_);
-    const auto first_key = core::read_tensor_f32(layers_.front().key_tensor.tensor);
+    const auto first_key = read_cache_tensor_f32(layers_.front().key_tensor.tensor);
     std::vector<float> first_key_keep(first_key.begin(), first_key.begin() + static_cast<ptrdiff_t>(keep_elems));
     debug::trace_log_f32(name + ".layer0.key", {1, valid_steps_, num_heads, head_dim}, first_key_keep);
     if (layers_.size() > 1) {
-        const auto last_key = core::read_tensor_f32(layers_.back().key_tensor.tensor);
+        const auto last_key = read_cache_tensor_f32(layers_.back().key_tensor.tensor);
         std::vector<float> last_key_keep(last_key.begin(), last_key.begin() + static_cast<ptrdiff_t>(keep_elems));
         debug::trace_log_f32(name + ".layer_last.key", {1, valid_steps_, num_heads, head_dim}, last_key_keep);
     }

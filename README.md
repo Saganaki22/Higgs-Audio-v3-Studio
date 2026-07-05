@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.1` is a Windows desktop app built with Rust/Tauri for
+Higgs Audio v3 Studio `0.2.3` is a Windows desktop app built with Rust/Tauri for
 local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
 app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
 loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
@@ -587,23 +587,31 @@ Make sure:
 ### VRAM spikes during generation
 
 Short VRAM spikes can happen during inference. They usually come from temporary
-workspace buffers, KV cache growth, CUDA/ggml scratch allocations, audio codec
-stages, or graph execution setup. A quantized model can still need extra transient
-memory while generating.
+workspace buffers, KV cache allocation, CUDA/ggml scratch allocations, audio
+codec stages, or graph execution setup. A quantized model can still need extra
+transient memory while generating.
 
 Seeing the card jump close to full VRAM for a moment does not always mean the
 model weights themselves need that much memory. CUDA/ggml can reserve large
 workspace and scratch regions sized for the current graph/session, and Windows
-or NVML may report that reserved memory as used. Low token counts can still show
-the same reservation spike because the scratch workspace is often allocated up
-front; higher token counts mostly affect how long the generation runs and how
-much KV cache grows.
+or NVML may report that reserved memory as used. The Higgs generator decode graph
+allocates KV cache for the requested maximum token cap, so very high
+`max_tokens` values can reserve much more VRAM up front even when the text is
+short.
+
+Version `0.2.3` releases Higgs runtime graphs and codec graphs after each
+request, releases them when streaming is cancelled or errors out, checks cancel
+inside the native decode loop, and sends per-stage native VRAM diagnostics to
+the Command Centre. Use those `vram stage=...` log lines to see whether a spike
+comes from reference encoding, generator decode graph allocation, streaming codec
+decode, final codec decode, or cleanup. The static decode KV cache remains on the
+known-stable F32 path in the packaged build.
 
 If you run out of memory:
 
 - Use a smaller or lower-quantized model.
 - Close other GPU-heavy apps.
-- Reduce max tokens.
+- Reduce max tokens; the UI default is `1024`.
 - Disable longform chunking or use smaller chunks.
 - Try a smaller reference clip.
 
