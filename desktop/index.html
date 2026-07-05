@@ -51,7 +51,7 @@
               <button id="load-model-btn" class="compact-button primary" type="button" disabled>Load Model</button>
               <button id="unload-model-btn" class="compact-button" type="button" disabled>Unload</button>
             </div>
-            <button id="download-engine-btn" class="compact-button full-width-button" type="button">⬇ Download DLL Engine</button>
+            <button id="download-engine-btn" class="compact-button full-width-button" type="button">⬇ Download Engine DLLs</button>
           </section>
 
           <!-- Whisper panel -->
@@ -125,7 +125,7 @@
 
           <footer class="sidebar-footer">
             <button id="github-link" class="footer-link" type="button">★ Saganaki22/Higgs-Audio-v3-Studio</button>
-            <button id="version-link" class="footer-link version-link" type="button">v0.2.3</button>
+            <button id="version-link" class="footer-link version-link" type="button">v0.2.31</button>
           </footer>
         </aside>
 
@@ -753,6 +753,40 @@
           <div class="modal-actions">
             <button id="speaker-export-cancel" class="compact-button" type="button">Cancel</button>
             <button id="speaker-export-confirm" class="compact-button primary" type="button">Export selected</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ═══════════ Engine dependency diagnostics ═══════════ -->
+      <div id="engine-diagnostic-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="engine-diagnostic-title">
+        <section class="modal-panel engine-diagnostic-panel">
+          <div class="modal-head">
+            <div>
+              <h3 id="engine-diagnostic-title">Engine Dependency Check</h3>
+              <span id="engine-diagnostic-subtitle" class="api-status-text">Windows loader preflight</span>
+            </div>
+            <button id="engine-diagnostic-close" class="popover-close" type="button" aria-label="Close">✕</button>
+          </div>
+          <div class="engine-diagnostic-body">
+            <p id="engine-diagnostic-summary" class="input-hint"></p>
+            <div>
+              <strong>Missing required DLLs</strong>
+              <div id="engine-diagnostic-missing" class="engine-diagnostic-list"></div>
+            </div>
+            <div>
+              <strong>Detected DLLs</strong>
+              <div id="engine-diagnostic-detected" class="engine-diagnostic-list compact"></div>
+            </div>
+            <details class="engine-diagnostic-details">
+              <summary>Search paths checked</summary>
+              <pre id="engine-diagnostic-paths"></pre>
+            </details>
+          </div>
+          <div class="modal-actions">
+            <button id="engine-diagnostic-copy" class="compact-button" type="button">Copy diagnostics</button>
+            <button id="engine-diagnostic-driver" class="compact-button" type="button">NVIDIA driver</button>
+            <button id="engine-diagnostic-cuda" class="compact-button" type="button">CUDA 13.x</button>
+            <button id="engine-diagnostic-vc" class="compact-button primary" type="button">VC++ runtime</button>
           </div>
         </section>
       </div>

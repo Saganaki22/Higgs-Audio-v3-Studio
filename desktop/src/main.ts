@@ -7,16 +7,19 @@ import {
   API_COMMAND_POPOUT_LABEL,
   API_LOG_STORAGE_KEY,
   APP_VERSION,
-  ENGINE_DLL_URL,
+  CUDA_DOWNLOAD_URL,
+  ENGINE_PACKAGE_URL,
   GITHUB_URL,
   HIGGS_MODEL_PRESETS,
   HIGGS_MODEL_RESOLVE_BASE,
   HIGGS_RECOMMENDED_MODEL,
   MINIMIZE_TO_TRAY_STORAGE_KEY,
+  NVIDIA_DRIVER_URL,
   MODEL_PATH_STORAGE_KEY,
   RELEASES_URL,
   SPEAKER_PERSONA_STORAGE_KEY,
   STREAM_PLAYBACK_STORAGE_KEY,
+  VC_REDIST_X64_URL,
   WHISPER_MODEL_PRESETS,
   WHISPER_MODEL_RESOLVE_BASE,
   WHISPER_MODEL_TREE_URL,
@@ -49,6 +52,8 @@ import type {
   ApiServerStatus,
   DownloadKind,
   DownloadProgressEvent,
+  EngineDependencyDiagnostic,
+  EngineDependencyStatus,
   GenerationAudioChunkEvent,
   GenerationJob,
   GenerationMode,
@@ -108,6 +113,7 @@ let linePointerDrag: LinePointerDrag | null = null;
 let activeGenerationJob: GenerationJob | null = null;
 const generationQueue: GenerationJob[] = [];
 const externalStudioJobs = new Map<string, StudioJobEvent>();
+let generationProgressPrefix = "Elapsed";
 let activeDownloadKind: DownloadKind = "model";
 let downloadActive = false;
 let downloadPaused = false;
@@ -176,6 +182,127 @@ function showToast(message: string, tone: "success" | "warning" | "error" = "suc
     toast.classList.remove("show");
     toastTimer = null;
   }, 3200);
+}
+
+let lastEngineDiagnostic: EngineDependencyDiagnostic | null = null;
+
+function dependencyLabel(dep: EngineDependencyStatus): string {
+  return `${dep.pattern} · ${dep.category}`;
+}
+
+function renderDependencyList(container: HTMLElement, deps: EngineDependencyStatus[], statusClass: "missing" | "detected"): void {
+  container.innerHTML = "";
+  if (!deps.length) {
+    const empty = document.createElement("div");
+    empty.className = `engine-diagnostic-item ${statusClass}`;
+    empty.innerHTML = `<strong>${statusClass === "missing" ? "None" : "Nothing detected yet"}</strong>`;
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const dep of deps) {
+    const item = document.createElement("div");
+    item.className = `engine-diagnostic-item ${statusClass}`;
+    item.innerHTML = `
+      <strong>${escapeHtml(dependencyLabel(dep))}</strong>
+      ${dep.foundPath ? `<code>${escapeHtml(dep.foundPath)}</code>` : `<span>${escapeHtml(dep.fix)}</span>`}
+    `;
+    container.appendChild(item);
+  }
+}
+
+function engineDiagnosticText(diagnostic: EngineDependencyDiagnostic): string {
+  const lines = [
+    "Higgs Audio v3 Studio Engine Diagnostics",
+    "",
+    `App version: ${APP_VERSION}`,
+    `Platform: ${diagnostic.platform}`,
+    `Engine path: ${diagnostic.enginePath || "(none)"}`,
+  ];
+
+  if (diagnostic.rawError) {
+    lines.push("", "Raw loader error:", diagnostic.rawError);
+  }
+
+  lines.push("", "Missing required DLLs:");
+  if (diagnostic.missing.length) {
+    for (const dep of diagnostic.missing) {
+      lines.push(`- ${dep.pattern} (${dep.category})`);
+      lines.push(`  Fix: ${dep.fix}`);
+    }
+  } else {
+    lines.push("- none");
+  }
+
+  lines.push("", "Detected DLLs:");
+  if (diagnostic.detected.length) {
+    for (const dep of diagnostic.detected) {
+      lines.push(`- ${dep.pattern}: ${dep.foundPath || "found"}`);
+    }
+  } else {
+    lines.push("- none");
+  }
+
+  if (diagnostic.optionalMissing.length) {
+    lines.push("", "Optional/informational checks not found:");
+    for (const dep of diagnostic.optionalMissing) {
+      lines.push(`- ${dep.pattern} (${dep.category})`);
+    }
+  }
+
+  lines.push("", "Search paths checked:");
+  for (const dir of diagnostic.searchDirs) lines.push(`- ${dir}`);
+
+  lines.push("", "Repair links:");
+  lines.push(`- Higgs engine DLL package: ${ENGINE_PACKAGE_URL}`);
+  lines.push(`- NVIDIA driver: ${NVIDIA_DRIVER_URL}`);
+  lines.push(`- CUDA Toolkit 13.x: ${CUDA_DOWNLOAD_URL}`);
+  lines.push(`- VC++ Redistributable x64: ${VC_REDIST_X64_URL}`);
+
+  return lines.join("\n");
+}
+
+function showEngineDiagnosticModal(diagnostic: EngineDependencyDiagnostic): void {
+  lastEngineDiagnostic = diagnostic;
+  const modal = el<HTMLDivElement>("#engine-diagnostic-modal");
+  const missingCount = diagnostic.missing.length;
+  setText(
+    "#engine-diagnostic-summary",
+    missingCount
+      ? `The engine DLL was found, but Windows cannot load ${missingCount} required dependency${missingCount === 1 ? "" : "ies"}. Click Download Engine DLLs or install the missing runtime(s), restart the app, then load the engine again.`
+      : diagnostic.rawError
+        ? "The known dependency check passed, but Windows still rejected the engine DLL. Copy diagnostics and include them in the GitHub issue."
+        : "The engine dependency check passed.",
+  );
+  setText("#engine-diagnostic-subtitle", diagnostic.enginePath || "No engine path");
+  renderDependencyList(el("#engine-diagnostic-missing"), diagnostic.missing, "missing");
+  renderDependencyList(el("#engine-diagnostic-detected"), diagnostic.detected, "detected");
+  el<HTMLPreElement>("#engine-diagnostic-paths").textContent = diagnostic.searchDirs.join("\n");
+  modal.classList.remove("hidden");
+}
+
+async function diagnoseEngineForPath(libraryPath?: string): Promise<EngineDependencyDiagnostic | null> {
+  try {
+    return await invoke<EngineDependencyDiagnostic>("diagnose_engine_load", { libraryPath });
+  } catch {
+    return null;
+  }
+}
+
+function initEngineDiagnosticModal(): void {
+  const modal = el<HTMLDivElement>("#engine-diagnostic-modal");
+  const close = () => modal.classList.add("hidden");
+  el("#engine-diagnostic-close").addEventListener("click", close);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) close();
+  });
+  el("#engine-diagnostic-copy").addEventListener("click", () => {
+    if (!lastEngineDiagnostic) return;
+    void copyText(engineDiagnosticText(lastEngineDiagnostic), "Engine diagnostics");
+  });
+  el("#engine-diagnostic-driver").addEventListener("click", () => openExternalUrl(NVIDIA_DRIVER_URL));
+  el("#engine-diagnostic-cuda").addEventListener("click", () => openExternalUrl(CUDA_DOWNLOAD_URL));
+  el("#engine-diagnostic-vc").addEventListener("click", () => openExternalUrl(VC_REDIST_X64_URL));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -983,6 +1110,12 @@ async function doLoadEngine(): Promise<void> {
   try {
     const bundled = await invoke<string | null>("bundled_engine_path");
     const libPath = bundled ?? undefined;
+    const diagnostic = await diagnoseEngineForPath(libPath);
+    if (diagnostic && !diagnostic.ok) {
+      showEngineDiagnosticModal(diagnostic);
+      showToast("Engine dependency missing. Opened repair details.", "error");
+      return;
+    }
     const result = await invoke<{ success: boolean; version: string; supportsStreaming?: boolean }>("load_engine", {
       libraryPath: libPath,
     });
@@ -994,6 +1127,11 @@ async function doLoadEngine(): Promise<void> {
       await refreshModelList();
     }
   } catch (e) {
+    const bundled = await invoke<string | null>("bundled_engine_path").catch(() => null);
+    const diagnostic = await diagnoseEngineForPath(bundled ?? undefined);
+    if (diagnostic) {
+      showEngineDiagnosticModal({ ...diagnostic, rawError: String(e) });
+    }
     showToast(`Failed to load engine: ${e}`, "error");
   }
 }
@@ -2177,6 +2315,49 @@ function ensureMultiDefaults(): void {
   }
 }
 
+function findMultiSpeakerPreflightIssues(speakers: MultiSpeaker[], lines: MultiLine[]): string[] {
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  lines.forEach((line, index) => {
+    const lineNo = index + 1;
+    const text = line.text.trim();
+    if (!text) {
+      const message = `Line ${lineNo} needs text`;
+      if (!seen.has(message)) {
+        seen.add(message);
+        issues.push(message);
+      }
+    }
+
+    const speaker = speakers.find((item) => item.id === line.speakerId);
+    if (!speaker) {
+      const message = `Line ${lineNo} uses a missing speaker. Pick an existing speaker before generating.`;
+      if (!seen.has(message)) {
+        seen.add(message);
+        issues.push(message);
+      }
+      return;
+    }
+
+    if (!line.overridePath && !speaker.refPath) {
+      const speakerName = speaker.name.trim() || `Speaker ${speakers.indexOf(speaker) + 1}`;
+      const message = `Line ${lineNo} uses "${speakerName}", but that speaker has no reference voice. Add a reference voice or choose a saved speaker identity.`;
+      if (!seen.has(message)) {
+        seen.add(message);
+        issues.push(message);
+      }
+    }
+  });
+  return issues;
+}
+
+function assertMultiSpeakerReady(speakers: MultiSpeaker[], lines: MultiLine[]): void {
+  const issues = findMultiSpeakerPreflightIssues(speakers, lines);
+  if (issues.length > 0) {
+    throw new Error(issues.slice(0, 4).join(" "));
+  }
+}
+
 function multiDropzoneMarkup(fileName: string, emptyText: string): string {
   if (fileName) {
     return `
@@ -2417,6 +2598,7 @@ function applyTaggedScriptImport(): void {
     return;
   }
 
+  const unresolvedTags: string[] = [];
   for (const row of parsed) {
     let speaker = multiSpeakers.find((item) => item.name.toLowerCase() === row.tag.toLowerCase());
     if (!speaker) {
@@ -2434,6 +2616,8 @@ function applyTaggedScriptImport(): void {
         void ensureSpeakerCachePath(persona).then((path) => {
           if (speaker) speaker.cachePath = path;
         }).catch((e) => console.warn("Speaker cache path failed", e));
+      } else if (!unresolvedTags.some((tag) => tag.toLowerCase() === row.tag.toLowerCase())) {
+        unresolvedTags.push(row.tag);
       }
       multiSpeakers.push(speaker);
     }
@@ -2449,7 +2633,11 @@ function applyTaggedScriptImport(): void {
   }
   while (multiLines.length < 2) multiLines.push(createLine(multiSpeakers[multiLines.length]?.id || multiSpeakers[0]?.id));
   renderMultiWorkflow();
-  showToast(`Imported ${parsed.length} tagged script line${parsed.length === 1 ? "" : "s"}`);
+  if (unresolvedTags.length > 0) {
+    showToast(`Imported ${parsed.length} lines. Add reference voices for: ${unresolvedTags.join(", ")}`, "warning");
+  } else {
+    showToast(`Imported ${parsed.length} tagged script line${parsed.length === 1 ? "" : "s"}`);
+  }
 }
 
 function reorderMultiLine(targetLineId: string, clientY: number): void {
@@ -3004,9 +3192,7 @@ function captureCurrentGenerationJob(): GenerationJob {
     };
   } else {
     ensureMultiDefaults();
-    for (let i = 0; i < multiLines.length; i++) {
-      if (!multiLines[i].text.trim()) throw new Error(`Line ${i + 1} needs text`);
-    }
+    assertMultiSpeakerReady(multiSpeakers, multiLines);
     payload = {
       kind: "multi",
       speakers: multiSpeakers.map(cloneMultiSpeaker),
@@ -3133,7 +3319,8 @@ function generationElapsedLabel(prefix = "Elapsed"): string {
   return `${prefix} ${elapsed}s`;
 }
 
-function setGenerationElapsedLabel(prefix = "Elapsed"): void {
+function setGenerationElapsedLabel(prefix = generationProgressPrefix): void {
+  generationProgressPrefix = prefix;
   setText("#gen-progress-text", generationElapsedLabel(prefix));
 }
 
@@ -3141,13 +3328,14 @@ function beginGeneration(job: GenerationJob): void {
   isGenerating = true;
   cancelRequested = false;
   activeGenerationJob = job;
+  generationProgressPrefix = "Elapsed";
   genStartedAt = performance.now();
   el<HTMLElement>("#output-section").classList.toggle("hidden", !streamPlayback);
   if (streamPlayback) startLiveStreamPreview();
   if (genTimer) clearInterval(genTimer);
   genTimer = window.setInterval(() => {
     if (!isGenerating || !activeGenerationJob) return;
-    setGenerationElapsedLabel();
+    setGenerationElapsedLabel(generationProgressPrefix);
   }, 350);
   const cancelBtn = el<HTMLButtonElement>("#cancel-btn");
   cancelBtn.disabled = false;
@@ -3235,11 +3423,7 @@ async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "
   const speakerPause = typeof options.pause_between_speakers === "number" ? options.pause_between_speakers : 0.15;
   const lineOptions = { ...options };
   delete lineOptions.pause_between_speakers;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].text.trim()) {
-      throw new Error(`Line ${i + 1} needs text`);
-    }
-  }
+  assertMultiSpeakerReady(speakers, lines);
 
   renderGenerationSteps([]);
 
@@ -4076,20 +4260,20 @@ function initDownload(): void {
     title.textContent = kind === "whisper"
       ? "Download Whisper Model"
       : kind === "engine"
-        ? "Download DLL Engine"
+        ? "Download Engine DLLs"
         : "Download Model";
     urlInput.placeholder = kind === "whisper"
       ? "Paste whisper.cpp ggml .bin URL…"
       : kind === "engine"
-        ? "DLL engine URL…"
+        ? "Engine package URL…"
         : "Paste HuggingFace GGUF URL…";
     presetRow.classList.toggle("hidden", kind !== "model");
     if (kind === "whisper") {
       urlInput.value = whisperPresetUrl(whisperPreset);
       urlInput.title = `${whisperPreset.id} (${whisperPreset.size})`;
     } else if (kind === "engine") {
-      urlInput.value = ENGINE_DLL_URL;
-      urlInput.title = "Downloads as audiocpp_engine.dll";
+      urlInput.value = ENGINE_PACKAGE_URL;
+      urlInput.title = "Downloads audiocpp_engine.dll plus required CUDA/MSVC runtime DLLs";
     } else {
       setTtsDownloadPreset(inferTtsPresetFromModelSelection(), !downloadActive);
     }
@@ -4115,7 +4299,7 @@ function initDownload(): void {
     try {
       if (kind === "engine") {
         const result = await invoke<{ path: string; size: number }>("download_engine_dll", { url });
-        showToast(`DLL engine downloaded: ${result.path}`);
+        showToast(`Engine DLLs downloaded: ${result.path}`);
       } else if (kind === "whisper") {
         const result = await invoke<{ path: string; size: number }>("download_model", {
           request: { url, destDir: "models/whisper", filename: null },
@@ -4150,7 +4334,7 @@ function initDownload(): void {
   engineTrigger.addEventListener("click", (e) => {
     e.stopPropagation();
     setOpen(true, "engine");
-    void startDownload("engine", ENGINE_DLL_URL);
+    void startDownload("engine", ENGINE_PACKAGE_URL);
   });
   statusButton.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -4565,6 +4749,7 @@ async function main(): Promise<void> {
   initTooltips();
   initSettings();
   initExternalLinks();
+  initEngineDiagnosticModal();
   initWhisperPanel();
   initModeTabs();
   initApiPanel();

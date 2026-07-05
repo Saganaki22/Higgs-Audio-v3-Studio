@@ -1,11 +1,15 @@
 import type { TtsModelPreset, WhisperModelPreset } from "./types";
 
-export const APP_VERSION = "0.2.3";
+export const APP_VERSION = "0.2.31";
 export const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 export const RELEASES_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases";
+export const CUDA_DOWNLOAD_URL = "https://developer.nvidia.com/cuda-downloads";
+export const NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx";
+export const VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
 export const HIGGS_MODEL_RESOLVE_BASE = "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main";
 export const HIGGS_RECOMMENDED_MODEL = "higgs-q8_0";
-export const ENGINE_DLL_URL = "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/engines/audiocpp_engine.dll";
+export const ENGINE_PACKAGE_URL = `${HIGGS_MODEL_RESOLVE_BASE}/engines`;
+export const ENGINE_DLL_URL = `${ENGINE_PACKAGE_URL}/audiocpp_engine.dll`;
 export const WHISPER_MODELS_URL = "https://huggingface.co/ggerganov/whisper.cpp";
 export const WHISPER_MODEL_TREE_URL = `${WHISPER_MODELS_URL}/tree/main`;
 export const WHISPER_MODEL_RESOLVE_BASE = `${WHISPER_MODELS_URL}/resolve/main`;

@@ -1833,6 +1833,69 @@ input[type="range"]::-moz-range-thumb {
 }
 .speaker-export-item:hover { border-color: var(--accent); }
 .speaker-export-item-main { display: grid; gap: 2px; min-width: 0; }
+.engine-diagnostic-panel {
+  max-width: min(780px, 94vw);
+  width: min(780px, 94vw);
+}
+.engine-diagnostic-body {
+  display: grid;
+  gap: 12px;
+  max-height: min(58vh, 520px);
+  overflow: auto;
+  padding-right: 4px;
+}
+.engine-diagnostic-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.engine-diagnostic-item {
+  background: var(--bg-inner);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+}
+.engine-diagnostic-item.missing {
+  border-color: rgba(239, 68, 68, 0.65);
+}
+.engine-diagnostic-item.detected {
+  border-color: rgba(20, 184, 166, 0.45);
+}
+.engine-diagnostic-item strong {
+  font-size: 12px;
+}
+.engine-diagnostic-item span,
+.engine-diagnostic-item code {
+  color: var(--text-muted);
+  font-size: 11px;
+  word-break: break-all;
+}
+.engine-diagnostic-list.compact {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.engine-diagnostic-details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.engine-diagnostic-details summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.engine-diagnostic-details pre {
+  background: var(--bg-inner);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 8px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
 .speaker-export-item-main strong,
 .speaker-export-item-main span {
   overflow: hidden;

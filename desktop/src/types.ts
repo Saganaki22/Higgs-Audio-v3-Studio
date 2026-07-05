@@ -80,6 +80,27 @@ export type ModelStatusEvent = {
   weightType?: string;
 };
 
+export type EngineDependencyStatus = {
+  name: string;
+  pattern: string;
+  category: string;
+  required: boolean;
+  foundPath?: string | null;
+  fix: string;
+};
+
+export type EngineDependencyDiagnostic = {
+  ok: boolean;
+  platform: string;
+  enginePath: string;
+  detected: EngineDependencyStatus[];
+  missing: EngineDependencyStatus[];
+  optionalMissing: EngineDependencyStatus[];
+  searchDirs: string[];
+  suggestions: string[];
+  rawError?: string | null;
+};
+
 export type ApiServerStatus = {
   running: boolean;
   host?: string;

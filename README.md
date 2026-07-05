@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.3` is a Windows desktop app built with Rust/Tauri for
+Higgs Audio v3 Studio `0.2.31` is a Windows desktop app built with Rust/Tauri for
 local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
 app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
 loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
@@ -36,7 +36,7 @@ Direct runtime downloads:
 
 | File | Recommended VRAM | Direct link |
 | --- | --- | --- |
-| Engine DLL | NVIDIA CUDA 13 GPU required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/engines/audiocpp_engine.dll |
+| Engine DLL package | NVIDIA CUDA 13 GPU/driver required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/tree/main/engines |
 | Higgs Q8_0 recommended | 12 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q8_0/q8_0.gguf |
 | Higgs Q6_K | 10 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/q6_k.gguf |
 | Higgs Q5_K | 9 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q5_k/q5_k.gguf |
@@ -47,7 +47,7 @@ Recommended user flow:
 
 1. Download the latest Windows release from GitHub.
 2. Launch `Higgs Audio v3 Studio`.
-3. Click `Download DLL Engine` if the engine is not bundled.
+3. Click `Download Engine DLLs` if the engine package is not installed.
 4. Download or browse to a Higgs model folder.
 5. Click `Load Engine`, then `Load Model`.
 6. Pick a workflow and generate audio.
@@ -63,6 +63,12 @@ drbaph/Higgs-Audio-v3-Studio/
   manifest.json
   engines/
     audiocpp_engine.dll
+    cublas64_13.dll
+    cublasLt64_13.dll
+    VCOMP140.DLL
+    MSVCP140.dll
+    VCRUNTIME140.dll
+    VCRUNTIME140_1.dll
   models/
     higgs-q8_0/
       q8_0.gguf
@@ -93,7 +99,7 @@ Hugging Face repo root so the runtime links resolve under `/resolve/main/...`.
 - Includes a Whisper model selector with direct `whisper.cpp` model downloads.
 - Includes a Speaker Gallery for reusable speaker identities with reference audio, transcript, notes, display image, normalization, and selected-speaker ZIP import/export.
 - Reuses saved speaker reference caches (`.hspkcache`) after first inference to skip repeated reference-code preparation.
-- Includes per-line speaker assignment, draggable line ordering, and speaker-line pauses.
+- Includes per-line speaker assignment, draggable line ordering, speaker-line pauses, line-by-line generation progress, and preflight validation for missing speaker references.
 - Includes a visible generation queue manager for queued UI jobs, with active-job status, edit, delete, and clear controls.
 - Includes a local API with normal WAV/MP3 responses, NDJSON streaming responses, saved-speaker discovery, and a detachable Command Centre log window.
 - Exposes generation controls such as temperature, top-k, top-p, seed mode, max tokens, chunking, emotion, style, speed, pitch, and expressiveness.
@@ -190,10 +196,13 @@ models/whisper/
 For packaged/portable builds, keep the `resources/` folder beside the executable.
 For development, place the engine DLL in `desktop/src-tauri/resources/engine/`.
 
-The in-app `Download DLL Engine` button downloads the engine as
-`audiocpp_engine.dll` into the per-user app data engine folder, which avoids
-Windows permission errors when the app is installed under `Program Files`.
-Bundled/portable resources are still checked automatically when present.
+The in-app `Download Engine DLLs` button downloads the engine package into the
+per-user app data engine folder, which avoids Windows permission errors when the
+app is installed under `Program Files`. The package includes
+`audiocpp_engine.dll`, cuBLAS/cuBLASLt CUDA 13 runtime DLLs, and the MSVC/OpenMP
+runtime DLLs required by the current engine build. Bundled/portable resources
+and system-installed CUDA/MSVC runtime folders are still checked automatically
+when present.
 
 </details>
 
@@ -324,7 +333,7 @@ an API restart after create/edit/delete.
 
 3. Keep the `resources/` folder beside `Higgs Audio v3 Studio.exe`.
 4. Run `Higgs Audio v3 Studio.exe`.
-5. If the engine is missing, click `Download DLL Engine`.
+5. If the engine package is missing, click `Download Engine DLLs`.
 6. Use the Model panel to download or browse to a Higgs model.
 7. Load the engine and model.
 
@@ -532,10 +541,11 @@ cd ..\..
 Expected behavior:
 
 - The app opens to the main TTS workflow.
-- `Download DLL Engine` downloads `audiocpp_engine.dll`.
+- `Download Engine DLLs` downloads `audiocpp_engine.dll` plus the required CUDA/MSVC runtime DLLs.
 - `Load Engine` changes the engine chip from unloaded to loaded.
 - `Load Model` enables generation after a valid model folder is selected.
 - Voice clone and multi-speaker workflows require reference audio.
+- Multi-speaker generation checks all speech lines before starting. If a line points to a missing speaker or a speaker without a reference voice, the app stops immediately and tells you which line to fix.
 - Whisper auto-transcription requires a selected `ggml-*.bin` Whisper model.
 
 </details>
@@ -564,7 +574,7 @@ The app could not find `audiocpp_engine.dll`.
 
 Fix one of these:
 
-- Click `Download DLL Engine`.
+- Click `Download Engine DLLs`.
 - Copy the DLL beside the release executable.
 - In dev, copy it to `desktop/src-tauri/resources/engine/audiocpp_engine.dll`.
 
@@ -578,10 +588,17 @@ full model entries.
 
 ### CUDA DLL load errors
 
+Version `0.2.31` adds an engine dependency preflight. If Windows cannot load
+`audiocpp_engine.dll`, the app checks common loader dependencies first and shows
+a repair dialog listing missing DLLs such as `nvcuda.dll`,
+`cublas64_13.dll`, `cublasLt64_13.dll`, `vcruntime140.dll`,
+`vcruntime140_1.dll`, `msvcp140.dll`, or `VCOMP140.DLL`.
+
 Make sure:
 
 - NVIDIA driver is current.
-- CUDA runtime DLLs required by the engine are on `PATH` or bundled beside the executable.
+- Click `Download Engine DLLs`, or make sure CUDA Toolkit 13.x runtime DLLs required by the engine are on `PATH`.
+- Click `Download Engine DLLs`, or install Microsoft Visual C++ Redistributable 2015-2022 x64.
 - The engine DLL was built for your GPU architecture.
 
 ### VRAM spikes during generation
@@ -599,7 +616,7 @@ allocates KV cache for the requested maximum token cap, so very high
 `max_tokens` values can reserve much more VRAM up front even when the text is
 short.
 
-Version `0.2.3` releases Higgs runtime graphs and codec graphs after each
+Version `0.2.31` releases Higgs runtime graphs and codec graphs after each
 request, releases them when streaming is cancelled or errors out, checks cancel
 inside the native decode loop, and sends per-stage native VRAM diagnostics to
 the Command Centre. Use those `vram stage=...` log lines to see whether a spike

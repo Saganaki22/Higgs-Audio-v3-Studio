@@ -173,6 +173,34 @@ fn engine_filename() -> &'static str {
     }
 }
 
+fn engine_package_filenames() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec![
+            "audiocpp_engine.dll",
+            "cublas64_13.dll",
+            "cublasLt64_13.dll",
+            "VCOMP140.DLL",
+            "MSVCP140.dll",
+            "VCRUNTIME140.dll",
+            "VCRUNTIME140_1.dll",
+        ]
+    } else {
+        vec![engine_filename()]
+    }
+}
+
+fn engine_package_base_url(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with(".dll") || lower.ends_with(".so") || lower.ends_with(".dylib") {
+        return trimmed
+            .rsplit_once('/')
+            .map(|(base, _)| base.to_string())
+            .unwrap_or_else(|| trimmed.to_string());
+    }
+    trimmed.to_string()
+}
+
 fn default_engine_download_dir() -> PathBuf {
     if cfg!(windows) {
         if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
@@ -442,6 +470,324 @@ fn bundled_engine_path(app: AppHandle, state: State<'_, AppState>) -> Option<Str
     find_engine_library(Some(&app), &state).map(|dll| dll.to_string_lossy().into_owned())
 }
 
+fn resolve_engine_path(
+    app: Option<&AppHandle>,
+    state: &AppState,
+    library_path: Option<String>,
+) -> Result<PathBuf, String> {
+    if let Some(p) = library_path {
+        let path = PathBuf::from(p);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!("Engine library not found at {}.", path.display()));
+    }
+
+    if let Some(dll) = find_engine_library(app, state) {
+        return Ok(dll);
+    }
+
+    let download_dir = state.engine_dir();
+    Err(format!(
+        "Engine library not found. Click Download Engine DLLs or copy {} into {}.",
+        engine_filename(),
+        download_dir.display()
+    ))
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineDependencyStatus {
+    name: String,
+    pattern: String,
+    category: String,
+    required: bool,
+    found_path: Option<String>,
+    fix: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineDependencyDiagnostic {
+    ok: bool,
+    platform: String,
+    engine_path: String,
+    detected: Vec<EngineDependencyStatus>,
+    missing: Vec<EngineDependencyStatus>,
+    optional_missing: Vec<EngineDependencyStatus>,
+    search_dirs: Vec<String>,
+    suggestions: Vec<String>,
+    raw_error: Option<String>,
+}
+
+#[derive(Clone)]
+struct EngineDependencySpec {
+    name: &'static str,
+    pattern: &'static str,
+    category: &'static str,
+    required: bool,
+    fix: &'static str,
+}
+
+fn diagnose_engine_dependencies(
+    engine_path: &Path,
+    raw_error: Option<&str>,
+) -> EngineDependencyDiagnostic {
+    #[cfg(target_os = "windows")]
+    {
+        diagnose_windows_engine_dependencies(engine_path, raw_error)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        EngineDependencyDiagnostic {
+            ok: true,
+            platform: std::env::consts::OS.to_string(),
+            engine_path: engine_path.to_string_lossy().into_owned(),
+            detected: Vec::new(),
+            missing: Vec::new(),
+            optional_missing: Vec::new(),
+            search_dirs: Vec::new(),
+            suggestions: Vec::new(),
+            raw_error: raw_error.map(|e| e.to_string()),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn diagnose_windows_engine_dependencies(
+    engine_path: &Path,
+    raw_error: Option<&str>,
+) -> EngineDependencyDiagnostic {
+    let specs = windows_engine_dependency_specs();
+    let search_dirs = windows_dependency_search_dirs(engine_path);
+    let mut detected = Vec::new();
+    let mut missing = Vec::new();
+    let mut optional_missing = Vec::new();
+    let mut suggestions = Vec::new();
+
+    for spec in specs {
+        let found = find_dependency_pattern(&search_dirs, spec.pattern);
+        let status = EngineDependencyStatus {
+            name: spec.name.to_string(),
+            pattern: spec.pattern.to_string(),
+            category: spec.category.to_string(),
+            required: spec.required,
+            found_path: found.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            fix: spec.fix.to_string(),
+        };
+
+        if found.is_some() {
+            detected.push(status);
+        } else if spec.required {
+            if !suggestions.iter().any(|s| s == spec.fix) {
+                suggestions.push(spec.fix.to_string());
+            }
+            missing.push(status);
+        } else {
+            optional_missing.push(status);
+        }
+    }
+
+    EngineDependencyDiagnostic {
+        ok: missing.is_empty(),
+        platform: "windows".to_string(),
+        engine_path: engine_path.to_string_lossy().into_owned(),
+        detected,
+        missing,
+        optional_missing,
+        search_dirs: search_dirs
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        suggestions,
+        raw_error: raw_error.map(|e| e.to_string()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_engine_dependency_specs() -> Vec<EngineDependencySpec> {
+    vec![
+        EngineDependencySpec {
+            name: "NVIDIA CUDA driver",
+            pattern: "nvcuda.dll",
+            category: "NVIDIA driver",
+            required: true,
+            fix: "Install or update the NVIDIA Studio/Game Ready driver, then reboot.",
+        },
+        EngineDependencySpec {
+            name: "CUDA 13 cuBLAS",
+            pattern: "cublas64_13.dll",
+            category: "CUDA 13 runtime",
+            required: true,
+            fix: "Download Engine DLLs in the app, or install CUDA Toolkit 13.x and make sure its bin folder is on PATH.",
+        },
+        EngineDependencySpec {
+            name: "CUDA 13 cuBLASLt",
+            pattern: "cublasLt64_13.dll",
+            category: "CUDA 13 runtime",
+            required: true,
+            fix: "Download Engine DLLs in the app, or install CUDA Toolkit 13.x and make sure its bin folder is on PATH.",
+        },
+        EngineDependencySpec {
+            name: "Microsoft Visual C++ runtime",
+            pattern: "vcruntime140.dll",
+            category: "Microsoft VC++ Redistributable",
+            required: true,
+            fix: "Download Engine DLLs in the app, or install Microsoft Visual C++ Redistributable 2015-2022 x64.",
+        },
+        EngineDependencySpec {
+            name: "Microsoft Visual C++ runtime 14.1",
+            pattern: "vcruntime140_1.dll",
+            category: "Microsoft VC++ Redistributable",
+            required: true,
+            fix: "Download Engine DLLs in the app, or install Microsoft Visual C++ Redistributable 2015-2022 x64.",
+        },
+        EngineDependencySpec {
+            name: "Microsoft C++ standard library",
+            pattern: "msvcp140.dll",
+            category: "Microsoft VC++ Redistributable",
+            required: true,
+            fix: "Download Engine DLLs in the app, or install Microsoft Visual C++ Redistributable 2015-2022 x64.",
+        },
+        EngineDependencySpec {
+            name: "Microsoft OpenMP runtime",
+            pattern: "VCOMP140.DLL",
+            category: "Microsoft VC++ Redistributable",
+            required: true,
+            fix: "Download Engine DLLs in the app, or install Microsoft Visual C++ Redistributable 2015-2022 x64.",
+        },
+    ]
+}
+
+#[cfg(target_os = "windows")]
+fn windows_dependency_search_dirs(engine_path: &Path) -> Vec<PathBuf> {
+    fn push_dir(dirs: &mut Vec<PathBuf>, dir: PathBuf) {
+        if !dir.exists() || !dir.is_dir() {
+            return;
+        }
+        let normalized = dir.to_string_lossy().to_lowercase();
+        if dirs
+            .iter()
+            .any(|existing| existing.to_string_lossy().to_lowercase() == normalized)
+        {
+            return;
+        }
+        dirs.push(dir);
+    }
+
+    let mut dirs = Vec::new();
+    if let Some(parent) = engine_path.parent() {
+        push_dir(&mut dirs, parent.to_path_buf());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            push_dir(&mut dirs, parent.to_path_buf());
+            push_dir(&mut dirs, parent.join("resources").join("engine"));
+        }
+    }
+    if let Some(windir) = std::env::var_os("WINDIR") {
+        push_dir(&mut dirs, PathBuf::from(windir).join("System32"));
+    }
+
+    for (key, value) in std::env::vars_os() {
+        let key = key.to_string_lossy().to_ascii_uppercase();
+        if key == "CUDA_PATH" || key.starts_with("CUDA_PATH_V") {
+            let cuda_bin = PathBuf::from(value).join("bin");
+            push_dir(&mut dirs, cuda_bin.clone());
+            push_dir(&mut dirs, cuda_bin.join("x64"));
+        }
+    }
+
+    let program_roots = ["ProgramFiles", "ProgramW6432"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    for root in program_roots {
+        let cuda_root = root
+            .join("NVIDIA GPU Computing Toolkit")
+            .join("CUDA");
+        for version in ["v13.3", "v13.2", "v13.1", "v13.0", "v13"] {
+            let cuda_bin = cuda_root.join(version).join("bin");
+            push_dir(&mut dirs, cuda_bin.clone());
+            push_dir(&mut dirs, cuda_bin.join("x64"));
+        }
+    }
+
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            push_dir(&mut dirs, dir);
+        }
+    }
+
+    dirs
+}
+
+#[cfg(target_os = "windows")]
+fn find_dependency_pattern(search_dirs: &[PathBuf], pattern: &str) -> Option<PathBuf> {
+    if !pattern.contains('*') {
+        for dir in search_dirs {
+            let candidate = dir.join(pattern);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+        return None;
+    }
+
+    let lower = pattern.to_ascii_lowercase();
+    let mut parts = lower.splitn(2, '*');
+    let prefix = parts.next().unwrap_or_default();
+    let suffix = parts.next().unwrap_or_default();
+
+    for dir in search_dirs {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if file_name.starts_with(prefix) && file_name.ends_with(suffix) {
+                return Some(entry.path());
+            }
+        }
+    }
+
+    None
+}
+
+fn format_dependency_diagnostic_error(diagnostic: &EngineDependencyDiagnostic) -> String {
+    if diagnostic.missing.is_empty() {
+        return diagnostic
+            .raw_error
+            .clone()
+            .unwrap_or_else(|| "Engine dependency check failed.".to_string());
+    }
+
+    let missing = diagnostic
+        .missing
+        .iter()
+        .map(|dep| format!("{} ({})", dep.pattern, dep.category))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let fixes = diagnostic.suggestions.join(" ");
+    format!(
+        "Engine dependency check failed. Missing: {missing}. {fixes}"
+    )
+}
+
+#[tauri::command]
+fn diagnose_engine_load(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    library_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let lib_path = resolve_engine_path(Some(&app), &state, library_path)?;
+    let diagnostic = diagnose_engine_dependencies(&lib_path, None);
+    serde_json::to_value(diagnostic).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn download_engine_dll(
     app: AppHandle,
@@ -449,15 +795,30 @@ async fn download_engine_dll(
     url: String,
 ) -> Result<serde_json::Value, String> {
     let dest_dir = state.engine_dir();
-    let filename = engine_filename();
     let control = state.download_control.clone();
+    let base_url = engine_package_base_url(&url);
+    let files = engine_package_filenames();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        download::download_file(&url, &dest_dir, Some(filename), &app, control)
+        let mut downloaded_files = Vec::new();
+        let mut total_size = 0_u64;
+        for filename in files {
+            let file_url = format!("{}/{}", base_url, filename);
+            let result =
+                download::download_file(&file_url, &dest_dir, Some(filename), &app, control.clone())?;
+            total_size += result.size;
+            downloaded_files.push(result.path);
+        }
+
+        Ok::<serde_json::Value, download::DownloadError>(serde_json::json!({
+            "path": dest_dir.to_string_lossy(),
+            "size": total_size,
+            "files": downloaded_files,
+        }))
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
     .map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "path": result.path, "size": result.size }))
+    Ok(result)
 }
 
 #[tauri::command]
@@ -466,39 +827,32 @@ async fn load_engine(
     state: State<'_, AppState>,
     library_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let lib_path = if let Some(p) = library_path {
-        PathBuf::from(p)
-    } else {
-        if let Some(dll) = find_engine_library(Some(&app), &state) {
-            dll
-        } else {
-            let download_dir = state.engine_dir();
-            return Err(format!(
-                "Engine library not found. Click Download DLL Engine or copy {} into {}.",
-                engine_filename(),
-                download_dir.display()
-            ));
-        }
-    };
+    let lib_path = resolve_engine_path(Some(&app), &state, library_path)?;
 
     #[cfg(target_os = "windows")]
     {
-        if let Some(parent) = lib_path.parent() {
-            engine::add_dll_directory(parent);
-        }
-        // Also add CUDA toolkit bin so cudart64/cublas64 DLLs are found
-        if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
-            let cuda_bin = PathBuf::from(&cuda_path).join("bin");
-            if cuda_bin.exists() {
-                engine::add_dll_directory(&cuda_bin);
-            }
+        for dir in windows_dependency_search_dirs(&lib_path) {
+            engine::add_dll_directory(&dir);
         }
     }
 
+    let diagnostic = diagnose_engine_dependencies(&lib_path, None);
+    if !diagnostic.ok {
+        return Err(format_dependency_diagnostic_error(&diagnostic));
+    }
+
+    let load_path = lib_path.clone();
     let engine = tauri::async_runtime::spawn_blocking(move || Engine::load(&lib_path))
         .await
         .map_err(|e| format!("task join error: {e}"))?
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let diagnostic = diagnose_engine_dependencies(&load_path, Some(&e.to_string()));
+            if diagnostic.ok {
+                e.to_string()
+            } else {
+                format_dependency_diagnostic_error(&diagnostic)
+            }
+        })?;
 
     let version = engine.version();
     let supports_streaming = engine.supports_streaming();
@@ -3357,6 +3711,7 @@ pub fn run() {
             engine_status,
             engine_version,
             bundled_engine_path,
+            diagnose_engine_load,
             download_engine_dll,
             load_engine,
             unload_engine,
