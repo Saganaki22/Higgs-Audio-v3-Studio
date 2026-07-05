@@ -205,7 +205,7 @@ with requests.post(url, headers=headers, json=payload, stream=True, timeout=600)
 - NVIDIA RTX GPU，预构建 CUDA 引擎需要 CUDA 13 兼容驱动。
 - 推荐 RTX 30 系、40 系或 50 系 GPU。
 - Q4_K_M 推荐 8 GB VRAM，Q5_K 推荐 9 GB VRAM，Q6_K 推荐 10 GB VRAM，Q8_0 推荐 12 GB VRAM，BF16 推荐 16 GB VRAM。
-- 生成时的瞬时 VRAM 峰值可能来自 ggml/CUDA 工作区、KV cache 和 codec 图。`0.2.3` 会在每次请求结束、取消或出错后释放运行时图缓存，在原生 decode 循环内部检查取消，并把每个阶段的 VRAM 诊断写入 Command Centre。可根据 `vram stage=...` 判断峰值来自 reference encode、generator decode graph、streaming codec decode、final codec decode 还是 cleanup。打包版本的静态 decode KV cache 保持在已知稳定的 F32 路径；如果显存仍然吃紧，请降低 `max_tokens`（默认 `1024`）并使用更小的长文本分块。
+- 生成时的瞬时 VRAM 峰值可能来自 ggml/CUDA 工作区、KV cache 和 codec 图。`0.2.3` 会在每次请求结束、取消或出错后释放运行时图缓存，在原生 decode 循环内部检查取消，并把每个阶段的 VRAM 诊断写入 Command Centre。可根据 `vram stage=...` 判断峰值来自 reference encode、generator decode graph、streaming codec decode、final codec decode 还是 cleanup。打包版 CUDA 引擎现在默认使用 F16 decode KV cache 来降低缓存显存压力，并保留 F32 诊断回退路径用于排错；如果显存仍然吃紧，请降低 `max_tokens`（默认 `1024`）并使用更小的长文本分块。
 
 ## 从源码构建
 

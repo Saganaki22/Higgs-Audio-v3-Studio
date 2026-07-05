@@ -604,8 +604,9 @@ request, releases them when streaming is cancelled or errors out, checks cancel
 inside the native decode loop, and sends per-stage native VRAM diagnostics to
 the Command Centre. Use those `vram stage=...` log lines to see whether a spike
 comes from reference encoding, generator decode graph allocation, streaming codec
-decode, final codec decode, or cleanup. The static decode KV cache remains on the
-known-stable F32 path in the packaged build.
+decode, final codec decode, or cleanup. The packaged CUDA engine now uses F16
+decode KV cache by default to reduce cache VRAM pressure, with an F32 diagnostic
+fallback available for troubleshooting.
 
 If you run out of memory:
 
