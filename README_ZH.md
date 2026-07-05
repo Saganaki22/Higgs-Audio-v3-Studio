@@ -79,16 +79,36 @@ drbaph/Higgs-Audio-v3-Studio/
 
 ## 运行时文件
 
-便携版建议保持如下结构：
+便携版/安装包自带的应用目录：
 
 ```text
 Higgs Audio v3 Studio.exe
 resources/
   engine/
-    audiocpp_engine.dll
+    audiocpp_engine.dll          # 自带的主引擎 DLL
   higgs-assets/
     higgs-audio-v3-tts-4b/
       config/tokenizer assets
+```
+
+点击 `Download Engine DLLs` 后下载到用户 app data 的引擎包：
+
+```text
+%LOCALAPPDATA%/
+  Higgs Audio v3 Studio/
+    engine/
+      audiocpp_engine.dll
+      cublas64_13.dll
+      cublasLt64_13.dll
+      MSVCP140.dll
+      VCOMP140.DLL
+      VCRUNTIME140.dll
+      VCRUNTIME140_1.dll
+```
+
+默认下载的模型目录：
+
+```text
 models/
   higgs-q8_0/
     q8_0.gguf
@@ -104,8 +124,10 @@ models/whisper/
   ggml-base.en-q8_0.bin
 ```
 
-应用内下载的引擎 DLL 会保存到用户可写的 app data 目录，避免安装到
-`Program Files` 后出现 Windows 权限错误。模型下载默认保存到：
+应用内下载的引擎包会保存到用户可写的 app data 目录，避免安装到
+`Program Files` 后出现 Windows 权限错误。这个引擎包包含
+`audiocpp_engine.dll`、cuBLAS/cuBLASLt CUDA 13 runtime DLL，以及当前引擎
+需要的 MSVC/OpenMP runtime DLL。模型下载默认保存到：
 
 ```text
 C:\Users\<you>\audiocpp\models\

@@ -166,18 +166,38 @@ responsive while the native engine is generating audio.
 ## Runtime Files
 
 <details open>
-<summary>Expected runtime file layout</summary>
+<summary>Runtime file locations</summary>
 
-The desktop app expects:
+Portable/packaged app folder:
 
 ```text
 Higgs Audio v3 Studio.exe
 resources/
   engine/
-    audiocpp_engine.dll
+    audiocpp_engine.dll          # bundled main engine DLL
   higgs-assets/
     higgs-audio-v3-tts-4b/
       config/tokenizer assets
+```
+
+Engine package downloaded by `Download Engine DLLs`:
+
+```text
+%LOCALAPPDATA%/
+  Higgs Audio v3 Studio/
+    engine/
+      audiocpp_engine.dll
+      cublas64_13.dll
+      cublasLt64_13.dll
+      MSVCP140.dll
+      VCOMP140.DLL
+      VCRUNTIME140.dll
+      VCRUNTIME140_1.dll
+```
+
+Default downloaded model folders:
+
+```text
 models/
   higgs-q8_0/
     q8_0.gguf
