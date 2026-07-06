@@ -7,7 +7,7 @@
 ![Engine](https://img.shields.io/badge/engine-C%2B%2B%20via%20C%20ABI-00599C)
 ![Build](https://img.shields.io/badge/build-MSVC%202022%20%7C%20GCC%2FClang-success)
 
-[中文说明](README_ZH.md)
+[中文说明](README_ZH.md) | [Windows/main branch](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/main)
 
 https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
@@ -20,13 +20,17 @@ Rust commands, Rust loads `audiocpp_engine.dll` (Windows) or
 `libaudiocpp_engine.so` (Linux) with `libloading`, and the engine executes the
 native inference path through a small C ABI.
 
+This `linux` branch contains the Linux-enabled desktop build and packaging notes.
+Windows release work continues on the
+[`main`](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/main) branch.
+
 The goal is simple: a practical desktop workflow for local TTS, voice cloning,
 speech continuation, and multi-speaker generation without making users manage a
 Python environment.
 
 ## Downloads
 
-Prebuilt packages are expected to be published from:
+Prebuilt packages are published from:
 
 - GitHub releases: https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases
 - Hugging Face runtime repository: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio
@@ -426,6 +430,9 @@ an API restart after create/edit/delete.
 
 <details open>
 <summary>Linux install</summary>
+
+Linux release assets are available on the GitHub Releases page. Use the `.deb`
+for Ubuntu/Debian installs, or the AppImage as the portable Linux build.
 
 **Option A: `.deb` package (Ubuntu/Debian)**
 
