@@ -1,11 +1,11 @@
 # Higgs Audio v3 Studio
 
-![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64-0078D4)
 ![GPU](https://img.shields.io/badge/GPU-NVIDIA%20CUDA-76B900)
 ![UI](https://img.shields.io/badge/UI-Tauri%202%20%2B%20Vite-24C8DB)
 ![Backend](https://img.shields.io/badge/backend-Rust%20%2B%20libloading-orange)
-![Engine](https://img.shields.io/badge/engine-C%2B%2B%20DLL%20via%20C%20ABI-00599C)
-![Build](https://img.shields.io/badge/build-MSVC%202022-success)
+![Engine](https://img.shields.io/badge/engine-C%2B%2B%20via%20C%20ABI-00599C)
+![Build](https://img.shields.io/badge/build-MSVC%202022%20%7C%20GCC%2FClang-success)
 
 [中文说明](README_ZH.md)
 
@@ -13,11 +13,12 @@ https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.31` is a Windows desktop app built with Rust/Tauri for
-local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
-app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
-loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
-inference path through a small C ABI.
+Higgs Audio v3 Studio `0.2.31` is a Windows and Linux desktop app built with
+Rust/Tauri for local Higgs Audio v3 TTS inference through a ported native
+C++/CUDA engine. The app does not shell out to a CLI sidecar: the Tauri UI calls
+Rust commands, Rust loads `audiocpp_engine.dll` (Windows) or
+`libaudiocpp_engine.so` (Linux) with `libloading`, and the engine executes the
+native inference path through a small C ABI.
 
 The goal is simple: a practical desktop workflow for local TTS, voice cloning,
 speech continuation, and multi-speaker generation without making users manage a
@@ -36,7 +37,8 @@ Direct runtime downloads:
 
 | File | Recommended VRAM | Direct link |
 | --- | --- | --- |
-| Engine DLL package | NVIDIA CUDA 13 GPU/driver required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/tree/main/engines |
+| Engine package (Windows) | NVIDIA CUDA 13 GPU/driver required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/tree/main/engines |
+| Engine package (Linux) | NVIDIA CUDA 13 GPU/driver required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/tree/main/engines_linux |
 | Higgs Q8_0 recommended | 12 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q8_0/q8_0.gguf |
 | Higgs Q6_K | 10 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/q6_k.gguf |
 | Higgs Q5_K | 9 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q5_k/q5_k.gguf |
@@ -45,9 +47,9 @@ Direct runtime downloads:
 
 Recommended user flow:
 
-1. Download the latest Windows release from GitHub.
+1. Download the latest release from GitHub (Windows `.exe` installer or Linux `.deb`/AppImage).
 2. Launch `Higgs Audio v3 Studio`.
-3. Click `Download Engine DLLs` if the engine package is not installed.
+3. Click `Download Engine DLLs` (Windows) or `Download Engine Files` (Linux) if the engine package is not installed.
 4. Download or browse to a Higgs model folder.
 5. Click `Load Engine`, then `Load Model`.
 6. Pick a workflow and generate audio.
@@ -69,6 +71,11 @@ drbaph/Higgs-Audio-v3-Studio/
     MSVCP140.dll
     VCRUNTIME140.dll
     VCRUNTIME140_1.dll
+  engines_linux/
+    libaudiocpp_engine.so
+    libcudart.so.13
+    libcublas.so.13
+    libcublasLt.so.13
   models/
     higgs-q8_0/
       q8_0.gguf
@@ -122,16 +129,25 @@ Primary target:
 - Current NVIDIA driver compatible with CUDA 13
 - Recommended: RTX 30-series, 40-series, or 50-series GPU with enough VRAM for the selected quantization
 
+Linux target:
+
+- Ubuntu 24.04 LTS x64 (recommended), Ubuntu 22.04 LTS acceptable
+- Tauri 2 / WebKitGTK 4.1 desktop runtime
+- GCC 13+ or Clang 18+ toolchain for source builds
+- NVIDIA RTX GPU with CUDA 13 support for the prebuilt CUDA engine
+- Current NVIDIA driver compatible with CUDA 13
+- Recommended: RTX 30-series, 40-series, or 50-series GPU with enough VRAM for the selected quantization
+
 Likely compatible:
 
 - Windows 10 x64 with current WebView2 and NVIDIA drivers
-- Other CUDA-capable NVIDIA GPUs if the DLL was built for their CUDA architecture
+- Other Debian/Ubuntu-based Linux distributions with WebKitGTK 4.1
+- Other CUDA-capable NVIDIA GPUs if the engine was built for their CUDA architecture
 
 Not the focus of this desktop package:
 
 - CPU-only generation
 - macOS desktop packaging
-- Linux desktop packaging
 
 </details>
 
@@ -223,6 +239,45 @@ app is installed under `Program Files`. The package includes
 runtime DLLs required by the current engine build. Bundled/portable resources
 and system-installed CUDA/MSVC runtime folders are still checked automatically
 when present.
+
+</details>
+
+<details>
+<summary>Linux runtime file locations</summary>
+
+Portable binary or installed package:
+
+```text
+higgs-audio-studio
+resources/
+  higgs-assets/
+    higgs-audio-v3-tts-4b/
+      config/tokenizer assets
+```
+
+Engine package downloaded by `Download Engine Files`:
+
+```text
+~/.higgs-audio-v3-studio/
+  engine/
+    libaudiocpp_engine.so
+    libcudart.so.13
+    libcublas.so.13
+    libcublasLt.so.13
+```
+
+Default downloaded model folders:
+
+```text
+~/audiocpp/models/
+  higgs-q8_0/
+    q8_0.gguf
+  ...
+```
+
+The engine `.so` files use `rpath=$ORIGIN` so they find the bundled CUDA runtime
+libraries next to them without requiring a system-wide CUDA Toolkit install. Users
+only need a working NVIDIA driver.
 
 </details>
 
@@ -369,6 +424,39 @@ an API restart after create/edit/delete.
 
 </details>
 
+<details open>
+<summary>Linux install</summary>
+
+**Option A: `.deb` package (Ubuntu/Debian)**
+
+```bash
+sudo apt install ./Higgs-Audio-v3-Studio_0.2.31_amd64.deb
+```
+
+Launch from the app menu or run `higgs-audio-studio` from terminal.
+
+**Option B: AppImage (portable)**
+
+```bash
+chmod +x Higgs-Audio-v3-Studio_0.2.31_amd64.AppImage
+./Higgs-Audio-v3-Studio_0.2.31_amd64.AppImage
+```
+
+**Option C: Raw binary (most portable, needs system WebKitGTK)**
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev libfuse2
+./higgs-audio-studio
+```
+
+After launching by any method:
+
+1. Click `Download Engine Files` to fetch the Linux CUDA engine package.
+2. Download or browse to a Higgs model folder.
+3. Load the engine and model.
+
+</details>
+
 ## Model Setup
 
 <details open>
@@ -439,6 +527,19 @@ Known-good Windows build inputs:
 | Node.js | 20+ recommended |
 | WebView2 | Required by Tauri on Windows |
 
+Known-good Linux build inputs:
+
+| Dependency | Version / Notes |
+| --- | --- |
+| GCC or Clang | GCC 13+ or Clang 18+ |
+| CMake | 3.20+ |
+| Ninja | 1.11+ |
+| CUDA Toolkit | CUDA 13.x (`nvcc`, `libcudart`, `libcufft`) |
+| Rust | Stable toolchain |
+| Node.js | 20+ recommended |
+| WebKitGTK 4.1 | `libwebkit2gtk-4.1-dev` and related GTK dev packages |
+| `patchelf` | For setting rpath on the engine `.so` |
+
 </details>
 
 ## Build Native Engine
@@ -490,6 +591,70 @@ For portable release builds, place it beside the final executable.
 
 </details>
 
+<details>
+<summary>Build the C++/CUDA shared library on Linux</summary>
+
+Install build dependencies:
+
+```bash
+sudo apt install -y build-essential git git-lfs curl wget pkg-config \
+  cmake ninja-build clang lld patchelf file unzip zip jq
+sudo apt install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+  libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev libfuse2
+```
+
+Add CUDA to PATH:
+
+```bash
+echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Clone and build:
+
+```bash
+git clone --recursive https://github.com/Saganaki22/Higgs-Audio-v3-Studio.git
+cd Higgs-Audio-v3-Studio
+
+cmake -S . -B build/linux-cuda-release -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -DENGINE_ENABLE_CUDA=ON \
+  -DENGINE_ENABLE_CUDA_GRAPHS=ON \
+  -DENGINE_ENABLE_OPENMP=ON \
+  -DENGINE_BUILD_DESKTOP_API=ON \
+  -DCMAKE_CUDA_ARCHITECTURES="86-real;89-real;120-real"
+
+cmake --build build/linux-cuda-release --target audiocpp_engine -j"$(nproc)"
+```
+
+The shared library is written to:
+
+```text
+build/linux-cuda-release/app/desktop_api/libaudiocpp_engine.so
+```
+
+Stage a self-contained engine package (includes CUDA runtime libs with `rpath=$ORIGIN`):
+
+```bash
+mkdir -p ~/hf-higgs-studio/engines_linux
+ENGINE_SO="$(find build/linux-cuda-release -name 'libaudiocpp_engine.so' | head -n1)"
+cp "$ENGINE_SO" ~/hf-higgs-studio/engines_linux/libaudiocpp_engine.so
+cp -L /usr/local/cuda/lib64/libcudart.so.13   ~/hf-higgs-studio/engines_linux/
+cp -L /usr/local/cuda/lib64/libcublas.so.13   ~/hf-higgs-studio/engines_linux/
+cp -L /usr/local/cuda/lib64/libcublasLt.so.13 ~/hf-higgs-studio/engines_linux/
+for f in ~/hf-higgs-studio/engines_linux/lib*.so*; do patchelf --set-rpath '$ORIGIN' "$f"; done
+```
+
+For development, copy the engine to:
+
+```text
+desktop/src-tauri/resources/engine/libaudiocpp_engine.so
+```
+
+</details>
+
 ## Build Desktop App
 
 <details>
@@ -533,6 +698,39 @@ Full Tauri build output is under:
 ```text
 desktop/src-tauri/target/release/
 desktop/src-tauri/target/release/bundle/
+```
+
+</details>
+
+<details>
+<summary>Build the Tauri app on Linux</summary>
+
+```bash
+cd desktop
+npm ci
+npm run build
+```
+
+Expected outputs:
+
+```text
+desktop/src-tauri/target/release/higgs-audio-studio
+desktop/src-tauri/target/release/bundle/deb/Higgs Audio v3 Studio_0.2.31_amd64.deb
+desktop/src-tauri/target/release/bundle/appimage/Higgs Audio v3 Studio_0.2.31_amd64.AppImage
+```
+
+Build only the binary without installer bundles:
+
+```bash
+cd desktop
+npx @tauri-apps/cli build --no-bundle
+```
+
+For local testing, stage the engine files:
+
+```bash
+mkdir -p ~/.higgs-audio-v3-studio/engine
+cp ~/hf-higgs-studio/engines_linux/*.so* ~/.higgs-audio-v3-studio/engine/
 ```
 
 </details>
