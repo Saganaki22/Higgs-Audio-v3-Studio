@@ -1,0 +1,76 @@
+name: Linux Desktop CI
+
+on:
+  push:
+    branches:
+      - linux
+  pull_request:
+    branches:
+      - linux
+  workflow_dispatch:
+
+jobs:
+  linux-desktop:
+    name: Ubuntu Tauri build
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libfuse2 \
+            libgtk-3-dev \
+            libjavascriptcoregtk-4.1-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config \
+            wget
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build:vite
+
+      - name: Check Tauri Rust crate
+        working-directory: desktop/src-tauri
+        run: cargo check --locked
+
+      - name: Build Linux desktop package
+        run: npm run build
+
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: higgs-audio-v3-studio-linux
+          if-no-files-found: warn
+          path: |
+            desktop/src-tauri/target/release/higgs-audio-studio
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
