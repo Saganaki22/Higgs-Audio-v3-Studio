@@ -9,6 +9,8 @@ import {
   APP_VERSION,
   CUDA_DOWNLOAD_URL,
   ENGINE_PACKAGE_URL,
+  ENGINE_LIB_WORD,
+  IS_WINDOWS,
   GITHUB_URL,
   HIGGS_MODEL_PRESETS,
   HIGGS_MODEL_RESOLVE_BASE,
@@ -224,7 +226,7 @@ function engineDiagnosticText(diagnostic: EngineDependencyDiagnostic): string {
     lines.push("", "Raw loader error:", diagnostic.rawError);
   }
 
-  lines.push("", "Missing required DLLs:");
+  lines.push("", `Missing required ${ENGINE_LIB_WORD}:`);
   if (diagnostic.missing.length) {
     for (const dep of diagnostic.missing) {
       lines.push(`- ${dep.pattern} (${dep.category})`);
@@ -234,7 +236,7 @@ function engineDiagnosticText(diagnostic: EngineDependencyDiagnostic): string {
     lines.push("- none");
   }
 
-  lines.push("", "Detected DLLs:");
+  lines.push("", `Detected ${ENGINE_LIB_WORD}:`);
   if (diagnostic.detected.length) {
     for (const dep of diagnostic.detected) {
       lines.push(`- ${dep.pattern}: ${dep.foundPath || "found"}`);
@@ -254,7 +256,7 @@ function engineDiagnosticText(diagnostic: EngineDependencyDiagnostic): string {
   for (const dir of diagnostic.searchDirs) lines.push(`- ${dir}`);
 
   lines.push("", "Repair links:");
-  lines.push(`- Higgs engine DLL package: ${ENGINE_PACKAGE_URL}`);
+  lines.push(`- Higgs engine package: ${ENGINE_PACKAGE_URL}`);
   lines.push(`- NVIDIA driver: ${NVIDIA_DRIVER_URL}`);
   lines.push(`- CUDA Toolkit 13.x: ${CUDA_DOWNLOAD_URL}`);
   lines.push(`- VC++ Redistributable x64: ${VC_REDIST_X64_URL}`);
@@ -269,9 +271,9 @@ function showEngineDiagnosticModal(diagnostic: EngineDependencyDiagnostic): void
   setText(
     "#engine-diagnostic-summary",
     missingCount
-      ? `The engine DLL was found, but Windows cannot load ${missingCount} required dependency${missingCount === 1 ? "" : "ies"}. Click Download Engine DLLs or install the missing runtime(s), restart the app, then load the engine again.`
+      ? `The engine was found, but ${IS_WINDOWS ? "Windows" : "the system"} cannot load ${missingCount} required dependency${missingCount === 1 ? "" : "ies"}. Click Download Engine ${ENGINE_LIB_WORD} or install the missing runtime(s), restart the app, then load the engine again.`
       : diagnostic.rawError
-        ? "The known dependency check passed, but Windows still rejected the engine DLL. Copy diagnostics and include them in the GitHub issue."
+        ? `The known dependency check passed, but ${IS_WINDOWS ? "Windows" : "the system"} still rejected the engine. Copy diagnostics and include them in the GitHub issue.`
         : "The engine dependency check passed.",
   );
   setText("#engine-diagnostic-subtitle", diagnostic.enginePath || "No engine path");
@@ -337,13 +339,17 @@ function applyAccent(accent: string): void {
   });
 }
 
+let uiScaleRaf: number | null = null;
 function applyUiScale(percent: number): void {
   currentUiScale = Math.min(115, Math.max(90, percent || 100));
-  document.documentElement.style.setProperty("--ui-scale", (currentUiScale / 100).toFixed(2));
+  const newScale = (currentUiScale / 100).toFixed(2);
   localStorage.setItem("higgsAudio.uiScale", String(currentUiScale));
   el<HTMLInputElement>("#ui-scale").value = String(currentUiScale);
   setText("#ui-scale-label", `${currentUiScale}%`);
-  requestAnimationFrame(() => {
+  document.documentElement.style.setProperty("--ui-scale", newScale);
+  if (uiScaleRaf !== null) cancelAnimationFrame(uiScaleRaf);
+  uiScaleRaf = requestAnimationFrame(() => {
+    uiScaleRaf = null;
     drawHardwareGraph();
     drawWaveform();
   });
@@ -454,13 +460,16 @@ function initSettings(): void {
   el<HTMLInputElement>("#ui-scale").addEventListener("input", (event) => {
     applyUiScale(parseInt((event.target as HTMLInputElement).value, 10));
   });
+  el<HTMLInputElement>("#ui-scale").addEventListener("change", (event) => {
+    applyUiScale(parseInt((event.target as HTMLInputElement).value, 10));
+  });
   const streamToggle = el<HTMLInputElement>("#stream-playback");
   streamToggle.checked = streamPlayback;
   streamToggle.addEventListener("change", () => {
     streamPlayback = streamToggle.checked;
     localStorage.setItem(STREAM_PLAYBACK_STORAGE_KEY, String(streamPlayback));
     if (streamPlayback && !engineSupportsStreaming) {
-      showToast("Streaming needs an updated Higgs engine DLL; current DLL falls back to normal generation.", "warning");
+      showToast(`Streaming needs an updated Higgs engine ${ENGINE_LIB_WORD.replace("s", "")}; current engine falls back to normal generation.`, "warning");
     }
   });
   const trayToggle = el<HTMLInputElement>("#minimize-to-tray");
@@ -4260,7 +4269,7 @@ function initDownload(): void {
     title.textContent = kind === "whisper"
       ? "Download Whisper Model"
       : kind === "engine"
-        ? "Download Engine DLLs"
+        ? IS_WINDOWS ? "Download Engine DLLs" : "Download Engine Libraries"
         : "Download Model";
     urlInput.placeholder = kind === "whisper"
       ? "Paste whisper.cpp ggml .bin URL…"
@@ -4273,7 +4282,9 @@ function initDownload(): void {
       urlInput.title = `${whisperPreset.id} (${whisperPreset.size})`;
     } else if (kind === "engine") {
       urlInput.value = ENGINE_PACKAGE_URL;
-      urlInput.title = "Downloads audiocpp_engine.dll plus required CUDA/MSVC runtime DLLs";
+      urlInput.title = IS_WINDOWS
+        ? "Downloads audiocpp_engine.dll plus required CUDA/MSVC runtime DLLs"
+        : "Downloads libaudiocpp_engine.so plus CUDA runtime libraries";
     } else {
       setTtsDownloadPreset(inferTtsPresetFromModelSelection(), !downloadActive);
     }
@@ -4299,7 +4310,7 @@ function initDownload(): void {
     try {
       if (kind === "engine") {
         const result = await invoke<{ path: string; size: number }>("download_engine_dll", { url });
-        showToast(`Engine DLLs downloaded: ${result.path}`);
+        showToast(`Engine ${ENGINE_LIB_WORD} downloaded: ${result.path}`);
       } else if (kind === "whisper") {
         const result = await invoke<{ path: string; size: number }>("download_model", {
           request: { url, destDir: "models/whisper", filename: null },
@@ -4745,7 +4756,16 @@ function initTextCounting(): void {
 // Bootstrap
 // ═══════════════════════════════════════════════════════════════════════════
 
+function initPlatformLabels(): void {
+  if (IS_WINDOWS) return;
+  setText("#engine-btn-label", "Download Engine Files");
+  setText("#stream-playback-hint", "Requires a streaming-capable Higgs engine. The current offline engine falls back to normal generation.");
+  setText("#diag-missing-label", `Missing required ${ENGINE_LIB_WORD}`);
+  setText("#diag-detected-label", `Detected ${ENGINE_LIB_WORD}`);
+}
+
 async function main(): Promise<void> {
+  initPlatformLabels();
   initTooltips();
   initSettings();
   initExternalLinks();

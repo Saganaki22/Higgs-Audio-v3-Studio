@@ -185,7 +185,12 @@ fn engine_package_filenames() -> Vec<&'static str> {
             "VCRUNTIME140_1.dll",
         ]
     } else {
-        vec![engine_filename()]
+        vec![
+            engine_filename(),
+            "libcudart.so.13",
+            "libcublas.so.13",
+            "libcublasLt.so.13",
+        ]
     }
 }
 
@@ -862,7 +867,9 @@ async fn load_engine(
     {
         let mut nvml_guard = state.nvml.lock().unwrap();
         if nvml_guard.is_none() {
-            if let Ok(nvml) = Nvml::init() {
+            let mut builder = Nvml::builder();
+            let lib_path = std::ffi::OsStr::new("libnvidia-ml.so.1");
+            if let Ok(nvml) = builder.lib_path(lib_path).init() {
                 *nvml_guard = Some(nvml);
             }
         }
@@ -3483,7 +3490,9 @@ fn hardware_snapshot(state: State<'_, AppState>) -> HardwareSnapshot {
     // --- GPU via NVML (lazy init on first poll) ---
     let mut nvml_guard = state.nvml.lock().unwrap();
     if nvml_guard.is_none() {
-        match Nvml::init() {
+        let mut builder = Nvml::builder();
+        let lib_path = std::ffi::OsStr::new("libnvidia-ml.so.1");
+        match builder.lib_path(lib_path).init() {
             Ok(nvml) => {
                 *nvml_guard = Some(nvml);
             }

@@ -51,7 +51,7 @@
               <button id="load-model-btn" class="compact-button primary" type="button" disabled>Load Model</button>
               <button id="unload-model-btn" class="compact-button" type="button" disabled>Unload</button>
             </div>
-            <button id="download-engine-btn" class="compact-button full-width-button" type="button">⬇ Download Engine DLLs</button>
+            <button id="download-engine-btn" class="compact-button full-width-button" type="button">⬇ <span id="engine-btn-label">Download Engine DLLs</span></button>
           </section>
 
           <!-- Whisper panel -->
@@ -76,7 +76,7 @@
               <h2>Hardware</h2>
               <div class="hardware-head-controls">
                 <label>Poll
-                  <select id="hardware-poll-rate" name="hardwarePollRate" title="Hardware monitor polling interval.">
+                  <select id="hardware-poll-rate" name="hardwarePollRate" class="select-input" title="Hardware monitor polling interval.">
                     <option value="250">250ms</option>
                     <option value="500">500ms</option>
                     <option value="1000" selected>1000ms</option>
@@ -696,7 +696,7 @@
           <span>Stream playback during generation</span>
           <span class="toggle-switch"><input type="checkbox" id="stream-playback" /><span class="toggle-slider"></span></span>
         </label>
-        <p class="settings-hint">Requires a streaming-capable Higgs engine DLL. The current offline engine falls back to normal generation.</p>
+        <p id="stream-playback-hint" class="settings-hint">Requires a streaming-capable Higgs engine DLL. The current offline engine falls back to normal generation.</p>
         <label class="settings-row settings-toggle">
           <span>Minimize to tray on close</span>
           <span class="toggle-switch"><input type="checkbox" id="minimize-to-tray" /><span class="toggle-slider"></span></span>
@@ -770,11 +770,11 @@
           <div class="engine-diagnostic-body">
             <p id="engine-diagnostic-summary" class="input-hint"></p>
             <div>
-              <strong>Missing required DLLs</strong>
+              <strong id="diag-missing-label">Missing required DLLs</strong>
               <div id="engine-diagnostic-missing" class="engine-diagnostic-list"></div>
             </div>
             <div>
-              <strong>Detected DLLs</strong>
+              <strong id="diag-detected-label">Detected DLLs</strong>
               <div id="engine-diagnostic-detected" class="engine-diagnostic-list compact"></div>
             </div>
             <details class="engine-diagnostic-details">
