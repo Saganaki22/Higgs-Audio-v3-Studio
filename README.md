@@ -7,7 +7,7 @@
 ![Engine](https://img.shields.io/badge/engine-C%2B%2B%20DLL%20via%20C%20ABI-00599C)
 ![Build](https://img.shields.io/badge/build-MSVC%202022-success)
 
-[中文说明](README_ZH.md)
+[中文说明](README_ZH.md) | [Linux branch](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux)
 
 https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
@@ -19,15 +19,21 @@ app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
 loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
 inference path through a small C ABI.
 
+This `main` branch tracks the Windows desktop release. Linux `.deb` and AppImage
+builds are available from the same GitHub Releases page and are built from the
+[`linux`](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux)
+branch.
+
 The goal is simple: a practical desktop workflow for local TTS, voice cloning,
 speech continuation, and multi-speaker generation without making users manage a
 Python environment.
 
 ## Downloads
 
-Prebuilt packages are expected to be published from:
+Prebuilt packages are published from:
 
 - GitHub releases: https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases
+- Linux branch source: https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux
 - Hugging Face runtime repository: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio
 - Runtime manifest: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/manifest.json
 - Checksums: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/checksums/SHA256SUMS.txt
@@ -37,6 +43,7 @@ Direct runtime downloads:
 | File | Recommended VRAM | Direct link |
 | --- | --- | --- |
 | Engine DLL package | NVIDIA CUDA 13 GPU/driver required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/tree/main/engines |
+| Linux engine package | NVIDIA CUDA 13 GPU/driver required | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/tree/main/engines_linux |
 | Higgs Q8_0 recommended | 12 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q8_0/q8_0.gguf |
 | Higgs Q6_K | 10 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/q6_k.gguf |
 | Higgs Q5_K | 9 GB VRAM | https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q5_k/q5_k.gguf |
@@ -45,9 +52,9 @@ Direct runtime downloads:
 
 Recommended user flow:
 
-1. Download the latest Windows release from GitHub.
+1. Download the latest Windows release from GitHub. Linux users should download the `.deb` or AppImage from the same Releases page.
 2. Launch `Higgs Audio v3 Studio`.
-3. Click `Download Engine DLLs` if the engine package is not installed.
+3. Click `Download Engine DLLs` on Windows, or `Download Engine Files` on Linux, if the engine package is not installed.
 4. Download or browse to a Higgs model folder.
 5. Click `Load Engine`, then `Load Model`.
 6. Pick a workflow and generate audio.
@@ -69,6 +76,11 @@ drbaph/Higgs-Audio-v3-Studio/
     MSVCP140.dll
     VCRUNTIME140.dll
     VCRUNTIME140_1.dll
+  engines_linux/
+    libaudiocpp_engine.so
+    libcudart.so.13
+    libcublas.so.13
+    libcublasLt.so.13
   models/
     higgs-q8_0/
       q8_0.gguf
@@ -131,7 +143,10 @@ Not the focus of this desktop package:
 
 - CPU-only generation
 - macOS desktop packaging
-- Linux desktop packaging
+
+Linux desktop packaging lives on the separate
+[`linux`](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux)
+branch.
 
 </details>
 
