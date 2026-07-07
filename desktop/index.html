@@ -768,16 +768,48 @@
             <button id="setup-wizard-close" class="popover-close" type="button" aria-label="Close">✕</button>
           </div>
           <div class="setup-wizard-body">
-            <p class="input-hint">Start by pressing <strong>Download Engine DLLs</strong> in the Model panel. That installs the Higgs engine and required runtime DLLs into the app engine folder.</p>
-            <div class="setup-step-list">
-              <div><strong>1</strong><span>Download Engine DLLs</span></div>
-              <div><strong>2</strong><span>Download a Higgs model folder</span></div>
-              <div><strong>3</strong><span>Load Engine, Load Model, then generate</span></div>
+            <p id="setup-wizard-summary" class="input-hint">Checking local engine and model files...</p>
+            <div class="setup-check-list">
+              <div class="setup-check-row" id="setup-check-engine">
+                <span class="setup-check-icon" id="setup-engine-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>Engine DLLs</strong>
+                  <span id="setup-engine-detail">Checking engine package...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-browse-engine" class="compact-button" type="button">Browse</button>
+                  <button id="setup-wizard-download-engine" class="compact-button" type="button">Download</button>
+                  <button id="setup-wizard-load-engine" class="compact-button primary" type="button">Load</button>
+                </span>
+              </div>
+              <div class="setup-check-row" id="setup-check-model">
+                <span class="setup-check-icon" id="setup-model-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>Higgs model folder</strong>
+                  <span id="setup-model-detail">Checking downloaded model folders...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-browse-model" class="compact-button" type="button">Browse</button>
+                  <button id="setup-wizard-download-model" class="compact-button" type="button">Download</button>
+                  <button id="setup-wizard-load-model" class="compact-button primary" type="button">Load</button>
+                </span>
+              </div>
+              <div class="setup-check-row optional" id="setup-check-whisper">
+                <span class="setup-check-icon" id="setup-whisper-icon">i</span>
+                <span class="setup-check-main">
+                  <strong>Whisper auto-transcribe</strong>
+                  <span id="setup-whisper-detail">Optional. Needed only for auto reference transcripts.</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-download-whisper" class="compact-button" type="button">Download</button>
+                </span>
+              </div>
             </div>
           </div>
           <div class="modal-actions">
-            <button id="setup-wizard-skip" class="compact-button" type="button">Skip</button>
-            <button id="setup-wizard-download-engine" class="compact-button primary" type="button">Download Engine DLLs</button>
+            <button id="setup-wizard-refresh" class="compact-button" type="button">Refresh</button>
+            <button id="setup-wizard-skip" class="compact-button" type="button">Close</button>
+            <button id="setup-wizard-continue" class="compact-button primary" type="button">Open Studio</button>
           </div>
         </section>
       </div>

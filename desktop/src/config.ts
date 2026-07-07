@@ -16,6 +16,7 @@ export const WHISPER_MODEL_RESOLVE_BASE = `${WHISPER_MODELS_URL}/resolve/main`;
 export const WHISPER_RECOMMENDED_MODEL = "base.en-q8_0";
 export const SPEAKER_PERSONA_STORAGE_KEY = "higgsAudio.speakerPersonas";
 export const MODEL_PATH_STORAGE_KEY = "higgsAudio.selectedModelPath";
+export const ENGINE_PATH_STORAGE_KEY = "higgsAudio.selectedEnginePath";
 export const MINIMIZE_TO_TRAY_STORAGE_KEY = "higgsAudio.minimizeToTray";
 export const STREAM_PLAYBACK_STORAGE_KEY = "higgsAudio.streamPlayback";
 export const API_LOG_STORAGE_KEY = "higgsAudio.apiLogs";

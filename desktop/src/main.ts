@@ -10,6 +10,7 @@ import {
   APP_VERSION,
   CUDA_DOWNLOAD_URL,
   ENGINE_PACKAGE_URL,
+  ENGINE_PATH_STORAGE_KEY,
   FIRST_RUN_WIZARD_STORAGE_KEY,
   GITHUB_URL,
   HIGGS_MODEL_ASSET_FILES,
@@ -336,13 +337,127 @@ function hideSetupWizard(persist = false): void {
   if (persist) localStorage.setItem(FIRST_RUN_WIZARD_STORAGE_KEY, "true");
 }
 
-function maybeShowSetupWizard(): void {
+function setSetupCheck(
+  rowId: string,
+  iconId: string,
+  detailId: string,
+  state: "ready" | "missing" | "optional",
+  icon: string,
+  detail: string,
+): void {
+  const row = el<HTMLElement>(rowId);
+  row.classList.toggle("ready", state === "ready");
+  row.classList.toggle("missing", state === "missing");
+  row.classList.toggle("optional", state === "optional");
+  setText(iconId, icon);
+  setText(detailId, detail);
+}
+
+async function refreshSetupWizardState(): Promise<void> {
+  let engineStatus: ModelStatusEvent | null = null;
+  try {
+    engineStatus = await invoke<ModelStatusEvent>("engine_status");
+  } catch {
+    engineStatus = null;
+  }
+
+  const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+  const bundledEnginePath = await invoke<string | null>("bundled_engine_path").catch(() => null);
+  let enginePath = savedEnginePath || bundledEnginePath || "";
+  let engineReady = Boolean(engineStatus?.engineLoaded);
+  let enginePathValid = Boolean(engineStatus?.engineLoaded);
+  let engineDetail = engineStatus?.engineLoaded
+    ? "Loaded and ready"
+    : enginePath
+      ? `Found: ${enginePath}`
+      : "Not found. Download the engine package or browse to audiocpp_engine.dll.";
+  if (!engineReady && enginePath) {
+    let diagnostic = await diagnoseEngineForPath(enginePath);
+    if (!diagnostic && savedEnginePath && bundledEnginePath) {
+      localStorage.removeItem(ENGINE_PATH_STORAGE_KEY);
+      enginePath = bundledEnginePath;
+      diagnostic = await diagnoseEngineForPath(enginePath);
+    }
+    enginePathValid = Boolean(diagnostic);
+    engineReady = Boolean(diagnostic?.ok);
+    if (!diagnostic && savedEnginePath) {
+      engineDetail = `Saved engine path not found: ${savedEnginePath}`;
+    } else if (diagnostic?.ok) {
+      engineDetail = `Found: ${enginePath}`;
+    }
+    if (diagnostic && !diagnostic.ok) {
+      engineDetail = `Found engine, but missing ${diagnostic.missing.length} required runtime DLL${diagnostic.missing.length === 1 ? "" : "s"}.`;
+    }
+  }
+  setSetupCheck(
+    "#setup-check-engine",
+    "#setup-engine-icon",
+    "#setup-engine-detail",
+    engineReady ? "ready" : "missing",
+    engineReady ? "✓" : "!",
+    engineDetail,
+  );
+  el<HTMLButtonElement>("#setup-wizard-load-engine").disabled = !enginePathValid || Boolean(engineStatus?.engineLoaded);
+
+  let models: ModelListing[] = [];
+  try {
+    models = await invoke<ModelListing[]>("list_models");
+  } catch {
+    models = [];
+  }
+  const modelSelect = el<HTMLSelectElement>("#model-select");
+  let selectedModel = modelSelect.value || localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+  if (!selectedModel && models.length > 0) {
+    const recommended = [...models].sort((a, b) => modelSortRank(a) - modelSortRank(b))[0];
+    selectedModel = recommended.path;
+    localStorage.setItem(MODEL_PATH_STORAGE_KEY, selectedModel);
+    addLocalModelOption(selectedModel, modelDisplayName(recommended));
+  }
+  const modelReady = Boolean(engineStatus?.modelLoaded || selectedModel || models.length > 0);
+  const modelDetail = engineStatus?.modelLoaded
+    ? "Loaded and ready"
+    : selectedModel
+      ? `Selected: ${selectedModel}`
+      : models.length > 0
+        ? `${models.length} model folder${models.length === 1 ? "" : "s"} found. Select or load one.`
+        : "No Higgs model folder found. Download a model folder or browse to one.";
+  setSetupCheck(
+    "#setup-check-model",
+    "#setup-model-icon",
+    "#setup-model-detail",
+    modelReady ? "ready" : "missing",
+    modelReady ? "✓" : "!",
+    modelDetail,
+  );
+  el<HTMLButtonElement>("#setup-wizard-load-model").disabled = !selectedModel || Boolean(engineStatus?.modelLoaded);
+
+  const whisperPath = localStorage.getItem("higgsAudio.whisperModel") || "";
+  setSetupCheck(
+    "#setup-check-whisper",
+    "#setup-whisper-icon",
+    "#setup-whisper-detail",
+    whisperPath ? "ready" : "optional",
+    whisperPath ? "✓" : "i",
+    whisperPath ? `Selected: ${whisperPath}` : "Optional. Download only if you want auto-transcription.",
+  );
+
+  const readyCount = Number(engineReady) + Number(modelReady);
+  setText(
+    "#setup-wizard-summary",
+    readyCount === 2
+      ? "Core setup found. You can load anything not already loaded, or close this wizard."
+      : "Some core setup files are missing. Use Browse if you already have them, or Download to fetch them.",
+  );
+}
+
+async function maybeShowSetupWizard(): Promise<void> {
   const modal = document.querySelector<HTMLDivElement>("#setup-wizard-modal");
   const diagnostic = document.querySelector<HTMLDivElement>("#engine-diagnostic-modal");
   if (!modal) return;
   if (localStorage.getItem(FIRST_RUN_WIZARD_STORAGE_KEY) === "true") return;
   if (setupWizardOpen) return;
   if (engineDiagnosticVisible || (diagnostic && !diagnostic.classList.contains("hidden"))) return;
+  await refreshSetupWizardState();
   modal.classList.remove("hidden");
   setupWizardOpen = true;
 }
@@ -355,10 +470,34 @@ function initSetupWizard(): void {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) close();
   });
+  el("#setup-wizard-refresh").addEventListener("click", () => {
+    void refreshSetupWizardState();
+  });
+  el("#setup-wizard-browse-engine").addEventListener("click", () => {
+    void doBrowseEngine().then(() => refreshSetupWizardState());
+  });
   el("#setup-wizard-download-engine").addEventListener("click", () => {
-    hideSetupWizard(true);
+    hideSetupWizard(false);
     el<HTMLButtonElement>("#download-engine-btn").click();
   });
+  el("#setup-wizard-load-engine").addEventListener("click", () => {
+    void doLoadEngine().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-browse-model").addEventListener("click", () => {
+    void doBrowseModel().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-download-model").addEventListener("click", () => {
+    hideSetupWizard(false);
+    el<HTMLButtonElement>("#download-trigger").click();
+  });
+  el("#setup-wizard-load-model").addEventListener("click", () => {
+    void doLoadModel().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-download-whisper").addEventListener("click", () => {
+    hideSetupWizard(false);
+    el<HTMLButtonElement>("#whisper-download-trigger").click();
+  });
+  el("#setup-wizard-continue").addEventListener("click", close);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1198,11 +1337,17 @@ async function refreshModelList(): Promise<void> {
   }
 }
 
-async function doLoadEngine(): Promise<void> {
+async function doLoadEngine(libraryPath?: string): Promise<void> {
   try {
-    const bundled = await invoke<string | null>("bundled_engine_path");
-    const libPath = bundled ?? undefined;
-    const diagnostic = await diagnoseEngineForPath(libPath);
+    const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+    const bundled = libraryPath ? null : await invoke<string | null>("bundled_engine_path");
+    let libPath = libraryPath || savedEnginePath || bundled || undefined;
+    let diagnostic = await diagnoseEngineForPath(libPath);
+    if (!libraryPath && savedEnginePath && !diagnostic && bundled) {
+      localStorage.removeItem(ENGINE_PATH_STORAGE_KEY);
+      libPath = bundled;
+      diagnostic = await diagnoseEngineForPath(libPath);
+    }
     if (diagnostic && !diagnostic.ok) {
       showEngineDiagnosticModal(diagnostic);
       showToast("Engine dependency missing. Opened repair details.", "error");
@@ -1212,6 +1357,7 @@ async function doLoadEngine(): Promise<void> {
       libraryPath: libPath,
     });
     if (result.success) {
+      if (libPath) localStorage.setItem(ENGINE_PATH_STORAGE_KEY, libPath);
       engineSupportsStreaming = Boolean(result.supportsStreaming);
       setText("#engine-chip", "Engine loaded");
       el<HTMLElement>("#engine-chip").classList.add("active");
@@ -1219,13 +1365,25 @@ async function doLoadEngine(): Promise<void> {
       await refreshModelList();
     }
   } catch (e) {
+    const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
     const bundled = await invoke<string | null>("bundled_engine_path").catch(() => null);
-    const diagnostic = await diagnoseEngineForPath(bundled ?? undefined);
+    const diagnostic = await diagnoseEngineForPath(libraryPath || savedEnginePath || bundled || undefined);
     if (diagnostic) {
       showEngineDiagnosticModal({ ...diagnostic, rawError: String(e) });
     }
     showToast(`Failed to load engine: ${e}`, "error");
   }
+}
+
+async function doBrowseEngine(): Promise<string | null> {
+  const selected = await open({
+    filters: [{ name: "Higgs Engine", extensions: ["dll", "so", "dylib"] }],
+  });
+  const path = Array.isArray(selected) ? selected[0] : selected;
+  if (!path) return null;
+  localStorage.setItem(ENGINE_PATH_STORAGE_KEY, path);
+  showToast(`Selected engine: ${path.split(/[/\\]/).pop() || path}`);
+  return path;
 }
 
 async function doLoadModel(): Promise<void> {
@@ -1287,7 +1445,9 @@ async function doUnloadModel(): Promise<void> {
 function initModelPanel(): void {
   const savedModelPath = localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
   if (savedModelPath) addLocalModelOption(savedModelPath);
-  el("#load-engine-btn").addEventListener("click", doLoadEngine);
+  el("#load-engine-btn").addEventListener("click", () => {
+    void doLoadEngine();
+  });
   el("#load-model-btn").addEventListener("click", doLoadModel);
   el("#unload-model-btn").addEventListener("click", doUnloadModel);
   el("#browse-model-btn").addEventListener("click", doBrowseModel);
@@ -1301,9 +1461,9 @@ function initModelPanel(): void {
   });
 }
 
-async function doBrowseModel(): Promise<void> {
+async function doBrowseModel(): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false });
-  if (!selected) return;
+  if (!selected) return null;
 
   const dirPath = Array.isArray(selected) ? selected[0] : selected;
   const dirName = dirPath.split(/[/\\]/).pop() || dirPath;
@@ -1329,7 +1489,7 @@ async function doBrowseModel(): Promise<void> {
     if (opt.value === dirPath) {
       select.value = dirPath;
       showToast(`Selected: ${dirName}`);
-      return;
+      return dirPath;
     }
   }
   const opt = document.createElement("option");
@@ -1339,6 +1499,7 @@ async function doBrowseModel(): Promise<void> {
   select.value = dirPath;
   showToast(`Added local model: ${dirName}`);
   el<HTMLButtonElement>("#load-model-btn").disabled = false;
+  return dirPath;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5012,7 +5173,7 @@ async function main(): Promise<void> {
   if (bundled) {
     await doLoadEngine();
   }
-  window.setTimeout(maybeShowSetupWizard, 500);
+  window.setTimeout(() => void maybeShowSetupWizard(), 500);
 
   window.addEventListener("resize", () => {
     drawHardwareGraph();
