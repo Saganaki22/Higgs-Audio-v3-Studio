@@ -1,6 +1,6 @@
 import type { TtsModelPreset, WhisperModelPreset } from "./types";
 
-export const APP_VERSION = "0.2.31";
+export const APP_VERSION = "0.2.4";
 export const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 export const RELEASES_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases";
 export const CUDA_DOWNLOAD_URL = "https://developer.nvidia.com/cuda-downloads";
@@ -20,6 +20,15 @@ export const MINIMIZE_TO_TRAY_STORAGE_KEY = "higgsAudio.minimizeToTray";
 export const STREAM_PLAYBACK_STORAGE_KEY = "higgsAudio.streamPlayback";
 export const API_LOG_STORAGE_KEY = "higgsAudio.apiLogs";
 export const API_COMMAND_POPOUT_LABEL = "api-command-centre";
+export const FIRST_RUN_WIZARD_STORAGE_KEY = "higgsAudio.setupWizardDismissed";
+export const HIGGS_REFERENCE_MAX_SECONDS = 30;
+export const HIGGS_MODEL_ASSET_FILES = [
+  "chat_template.jinja",
+  "config.json",
+  "higgs_audio_v2_tokenizer_config.json",
+  "tokenizer.json",
+  "tokenizer_config.json",
+];
 
 export const HIGGS_MODEL_PRESETS: TtsModelPreset[] = [
   {
