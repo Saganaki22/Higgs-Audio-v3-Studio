@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -53,6 +54,8 @@ constexpr int64_t kCodecSemanticHiddenSize = 768;
 constexpr int64_t kCodecSemanticIntermediateSize = 3072;
 constexpr int64_t kCodecSemanticHeads = 12;
 constexpr int64_t kCodecSemanticLayers = 12;
+constexpr int64_t kCodecDecodeFallbackFrames = 256;
+constexpr int64_t kCodecDecodeFallbackOverlapFrames = 8;
 
 struct GgmlContextDeleter {
     void operator()(ggml_context * ctx) const noexcept {
@@ -1548,6 +1551,33 @@ HiggsAudioCodeMatrix trim_decodable_codes(const HiggsAudioCodeMatrix & raw_codes
     return out;
 }
 
+bool is_codec_graph_allocation_failure(const std::runtime_error & error) {
+    const std::string message = error.what();
+    return message.find("allocate Higgs TTS codec graph") != std::string::npos ||
+           message.find("initialize Higgs TTS codec graph context") != std::string::npos;
+}
+
+HiggsAudioCodeMatrix slice_code_matrix(
+    const HiggsAudioCodeMatrix & codes,
+    int64_t begin_frame,
+    int64_t end_frame) {
+    if (begin_frame < 0 || end_frame <= begin_frame || end_frame > codes.frames || codes.codebooks <= 0) {
+        throw std::runtime_error("Higgs TTS codec slice range is invalid");
+    }
+    HiggsAudioCodeMatrix out;
+    out.frames = end_frame - begin_frame;
+    out.codebooks = codes.codebooks;
+    out.token_ids.reserve(static_cast<size_t>(out.frames * out.codebooks));
+    for (int64_t frame = begin_frame; frame < end_frame; ++frame) {
+        const auto start = codes.token_ids.begin() + static_cast<std::ptrdiff_t>(frame * codes.codebooks);
+        out.token_ids.insert(
+            out.token_ids.end(),
+            start,
+            start + static_cast<std::ptrdiff_t>(codes.codebooks));
+    }
+    return out;
+}
+
 class EncoderGraph {
 public:
     EncoderGraph(
@@ -1886,8 +1916,8 @@ public:
         ggml_set_output(output_);
         graph_ = ggml_new_graph_custom(ctx_.get(), 131072, false);
         ggml_build_forward_expand(graph_, output_);
-        gallocr_ = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend_));
-        if (gallocr_ == nullptr || !ggml_gallocr_alloc_graph(gallocr_, graph_)) {
+        buffer_ = ggml_backend_alloc_ctx_tensors(ctx_.get(), backend_);
+        if (buffer_ == nullptr) {
             throw std::runtime_error("failed to allocate Higgs TTS codec graph");
         }
         code_input_host_.resize(static_cast<size_t>(codebooks_));
@@ -1901,8 +1931,8 @@ public:
 
     ~DecoderGraph() {
         engine::core::release_backend_graph_resources(backend_, graph_);
-        if (gallocr_ != nullptr) {
-            ggml_gallocr_free(gallocr_);
+        if (buffer_ != nullptr) {
+            ggml_backend_buffer_free(buffer_);
         }
     }
 
@@ -1960,7 +1990,7 @@ private:
     std::vector<std::vector<int32_t>> code_input_host_;
     ggml_tensor * output_ = nullptr;
     ggml_cgraph * graph_ = nullptr;
-    ggml_gallocr_t gallocr_ = nullptr;
+    ggml_backend_buffer_t buffer_ = nullptr;
 };
 
 class HiggsAudioCodecWeightsRuntime {
@@ -2059,8 +2089,7 @@ struct HiggsAudioCodecDecoderRuntime::Impl {
         return encoder_graph->run(normalized);
     }
 
-    runtime::AudioBuffer decode(const HiggsAudioCodeMatrix & raw_codes) {
-        const auto codes = trim_decodable_codes(raw_codes, weights->config().codebook_size);
+    runtime::AudioBuffer decode_with_current_graph(const HiggsAudioCodeMatrix & codes) {
         if (graph == nullptr ||
             !graph->matches(weights->backend(), weights->threads(), codes.frames, codes.codebooks)) {
             graph = std::make_unique<DecoderGraph>(
@@ -2078,6 +2107,66 @@ struct HiggsAudioCodecDecoderRuntime::Impl {
             debug::trace_log_scalar("higgs_tts.codec.samples", codes.frames * product(weights->config().upsampling_ratios));
         }
         return graph->run(codes);
+    }
+
+    runtime::AudioBuffer decode_chunked(const HiggsAudioCodeMatrix & codes) {
+        const int64_t samples_per_frame = product(weights->config().upsampling_ratios);
+        int64_t chunk_frames = std::min<int64_t>(kCodecDecodeFallbackFrames, codes.frames);
+        std::string last_error;
+        while (chunk_frames >= 32) {
+            try {
+                runtime::AudioBuffer merged;
+                graph.reset();
+                for (int64_t start = 0; start < codes.frames; start += chunk_frames) {
+                    const int64_t keep_frames = std::min<int64_t>(chunk_frames, codes.frames - start);
+                    const int64_t overlap = std::min<int64_t>(
+                        kCodecDecodeFallbackOverlapFrames,
+                        std::max<int64_t>(0, chunk_frames / 4));
+                    const int64_t begin = std::max<int64_t>(0, start - overlap);
+                    const int64_t end = std::min<int64_t>(codes.frames, start + keep_frames + overlap);
+                    auto decoded = decode_with_current_graph(slice_code_matrix(codes, begin, end));
+                    const int64_t sample_begin = (start - begin) * samples_per_frame;
+                    const int64_t sample_count = keep_frames * samples_per_frame;
+                    const int64_t sample_end = sample_begin + sample_count;
+                    if (sample_begin < 0 || sample_end > static_cast<int64_t>(decoded.samples.size())) {
+                        throw std::runtime_error("Higgs TTS chunked codec decode produced an invalid sample range");
+                    }
+                    runtime::AudioBuffer segment;
+                    segment.sample_rate = decoded.sample_rate;
+                    segment.channels = decoded.channels;
+                    segment.samples.assign(
+                        decoded.samples.begin() + static_cast<std::ptrdiff_t>(sample_begin),
+                        decoded.samples.begin() + static_cast<std::ptrdiff_t>(sample_end));
+                    runtime::append_audio_buffer(merged, segment);
+                }
+                graph.reset();
+                debug::trace_log_scalar("higgs_tts.codec.chunked_decode_frames", chunk_frames);
+                return merged;
+            } catch (const std::runtime_error & error) {
+                if (!is_codec_graph_allocation_failure(error)) {
+                    throw;
+                }
+                last_error = error.what();
+                graph.reset();
+                chunk_frames /= 2;
+            }
+        }
+        throw std::runtime_error(last_error.empty() ? "failed to allocate Higgs TTS codec graph" : last_error);
+    }
+
+    runtime::AudioBuffer decode(const HiggsAudioCodeMatrix & raw_codes) {
+        const auto codes = trim_decodable_codes(raw_codes, weights->config().codebook_size);
+        try {
+            return decode_with_current_graph(codes);
+        } catch (const std::runtime_error & error) {
+            if (!is_codec_graph_allocation_failure(error)) {
+                throw;
+            }
+            debug::trace_log_scalar("higgs_tts.codec.chunked_decode_fallback", 1);
+            debug::trace_log_scalar("higgs_tts.codec.chunked_decode_original_frames", codes.frames);
+            graph.reset();
+            return decode_chunked(codes);
+        }
     }
 
     void release_runtime_cache() {
