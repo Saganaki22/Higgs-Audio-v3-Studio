@@ -33,8 +33,20 @@ endif()
 
 set_target_properties(audiocpp_engine PROPERTIES
     OUTPUT_NAME audiocpp_engine
-    PREFIX ""
 )
+
+# Windows DLLs are conventionally unprefixed. Keep the Linux SONAME and the
+# Studio loader aligned, and let a downloaded engine resolve sibling CUDA libs.
+if (WIN32)
+    set_target_properties(audiocpp_engine PROPERTIES PREFIX "")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(audiocpp_engine PROPERTIES
+        PREFIX "lib"
+        BUILD_RPATH "\$ORIGIN"
+        INSTALL_RPATH "\$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
 
 if (MSVC)
     set_target_properties(audiocpp_engine PROPERTIES

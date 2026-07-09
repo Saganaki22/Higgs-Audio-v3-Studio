@@ -782,7 +782,7 @@ AUDIOCPP_API const char * audiocpp_last_error(const audiocpp_engine * handle) {
 }
 
 AUDIOCPP_API const char * audiocpp_version(void) {
-    return "0.2.3";
+    return "0.2.40";
 }
 
 AUDIOCPP_API audiocpp_status audiocpp_transcribe(

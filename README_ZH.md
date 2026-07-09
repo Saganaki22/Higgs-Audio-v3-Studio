@@ -324,6 +324,13 @@ npm run build -- --bundles nsis
 
 ### Linux 构建
 
+请使用 Linux 分支源码：
+
+```bash
+git clone --branch linux --recurse-submodules https://github.com/Saganaki22/Higgs-Audio-v3-Studio.git
+cd Higgs-Audio-v3-Studio
+```
+
 安装依赖：
 
 ```bash
@@ -347,6 +354,14 @@ cmake -S . -B build/linux-cuda-release -G Ninja \
 
 cmake --build build/linux-cuda-release --target audiocpp_engine -j"$(nproc)"
 ```
+
+Linux 共享库输出为：
+
+```text
+build/linux-cuda-release/app/desktop_api/libaudiocpp_engine.so
+```
+
+该引擎会包含 `$ORIGIN` rpath，以便从同一目录加载打包的 CUDA 库。
 
 构建应用：
 
@@ -372,10 +387,10 @@ desktop/src-tauri/target/release/bundle/appimage/*.AppImage
 
 ### `Engine library not found`
 
-点击 `Download Engine DLLs`，或者把 `audiocpp_engine.dll` 放到
-`desktop/src-tauri/resources/engine/`。如果没有安装 CUDA Toolkit / VC++
-运行时，也可以通过 `Download Engine DLLs` 下载当前引擎需要的
-cuBLAS/cuBLASLt 与 MSVC/OpenMP DLL。
+Windows 上点击 `Download Engine DLLs`，Linux 上点击 `Download Engine Files`。
+也可以把 Windows 的 `audiocpp_engine.dll` 或 Linux 的
+`libaudiocpp_engine.so` 与对应运行库放到 `desktop/src-tauri/resources/engine/`。
+如果没有安装 CUDA Toolkit / VC++ runtime，也可以通过应用下载相应引擎包。
 
 ### CUDA DLL 加载错误
 

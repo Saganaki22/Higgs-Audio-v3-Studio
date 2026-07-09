@@ -28,6 +28,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            binutils \
+            cmake \
             curl \
             file \
             libayatana-appindicator3-dev \
@@ -39,6 +41,7 @@ jobs:
             libssl-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
+            ninja-build \
             patchelf \
             pkg-config \
             wget
@@ -58,6 +61,21 @@ jobs:
 
       - name: Build frontend
         run: npm run build:vite
+
+      - name: Build native Linux engine ABI smoke target
+        working-directory: .
+        run: |
+          cmake -S . -B build/linux-engine-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENGINE_ENABLE_CUDA=OFF \
+            -DENGINE_ENABLE_CUDA_GRAPHS=OFF \
+            -DENGINE_ENABLE_OPENMP=ON \
+            -DENGINE_BUILD_DESKTOP_API=ON
+          cmake --build build/linux-engine-ci --target audiocpp_engine -j"$(nproc)"
+          ENGINE_SO="build/linux-engine-ci/app/desktop_api/libaudiocpp_engine.so"
+          test -f "$ENGINE_SO"
+          readelf -d "$ENGINE_SO" | grep -E '\(RPATH\)|\(RUNPATH\)' | grep -F '$ORIGIN'
 
       - name: Check Tauri Rust crate
         working-directory: desktop/src-tauri

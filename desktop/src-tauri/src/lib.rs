@@ -780,6 +780,37 @@ fn diagnose_linux_engine_dependencies(
         }
     }
 
+    if let Some(library) = linux_loader_missing_library(raw_error) {
+        let fix = "Download the complete Linux Engine package, or install the missing CUDA/runtime library so the Linux dynamic loader can resolve it.";
+        if !suggestions.iter().any(|suggestion| suggestion == fix) {
+            suggestions.push(fix.to_string());
+        }
+        missing.push(EngineDependencyStatus {
+            name: "Linux dynamic loader".to_string(),
+            pattern: library,
+            category: "ELF runtime dependency".to_string(),
+            required: true,
+            found_path: None,
+            fix: fix.to_string(),
+        });
+    }
+
+    if let Some(has_origin_rpath) = linux_engine_has_origin_rpath(engine_path) {
+        let status = EngineDependencyStatus {
+            name: "Engine package runtime search path".to_string(),
+            pattern: "$ORIGIN".to_string(),
+            category: "Linux dynamic loader".to_string(),
+            required: false,
+            found_path: has_origin_rpath.then(|| engine_path.to_string_lossy().into_owned()),
+            fix: "Use the rebuilt libaudiocpp_engine.so package; it must carry a $ORIGIN rpath so sibling CUDA libraries can be loaded.".to_string(),
+        };
+        if has_origin_rpath {
+            detected.push(status);
+        } else {
+            optional_missing.push(status);
+        }
+    }
+
     EngineDependencyDiagnostic {
         ok: missing.is_empty(),
         platform: "linux".to_string(),
@@ -845,10 +876,38 @@ fn linux_engine_dependency_specs() -> Vec<EngineDependencySpec> {
             name: "GNU OpenMP runtime",
             pattern: "libgomp.so.1",
             category: "OpenMP runtime",
-            required: false,
-            fix: "Install libgomp1 if OpenMP runtime loading fails.",
+            required: true,
+            fix: "Install libgomp1, or use a Linux engine package built with OpenMP disabled.",
         },
     ]
+}
+
+#[cfg(target_os = "linux")]
+fn linux_loader_missing_library(raw_error: Option<&str>) -> Option<String> {
+    let raw_error = raw_error?;
+    let marker = ": cannot open shared object file";
+    let prefix = raw_error.split_once(marker)?.0.trim();
+    let candidate = prefix
+        .rsplit(|character: char| character == ':' || character.is_ascii_whitespace())
+        .find(|segment| !segment.is_empty())?;
+    let name = Path::new(candidate).file_name()?.to_string_lossy();
+    (name.starts_with("lib") && name.contains(".so")).then(|| name.into_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_engine_has_origin_rpath(engine_path: &Path) -> Option<bool> {
+    let output = std::process::Command::new("readelf")
+        .arg("-d")
+        .arg(engine_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let dynamic_entries = String::from_utf8_lossy(&output.stdout);
+    Some(dynamic_entries.lines().any(|line| {
+        (line.contains("(RPATH)") || line.contains("(RUNPATH)")) && line.contains("$ORIGIN")
+    }))
 }
 
 #[cfg(target_os = "linux")]

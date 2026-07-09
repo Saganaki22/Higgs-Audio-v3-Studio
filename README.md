@@ -458,7 +458,7 @@ for Ubuntu/Debian installs, or the AppImage as the portable Linux build.
 **Option A: `.deb` package (Ubuntu/Debian)**
 
 ```bash
-sudo apt install ./Higgs-Audio-v3-Studio_0.2.31_amd64.deb
+sudo apt install ./Higgs-Audio-v3-Studio_0.2.40_amd64.deb
 ```
 
 Launch from the app menu or run `higgs-audio-studio` from terminal.
@@ -466,8 +466,8 @@ Launch from the app menu or run `higgs-audio-studio` from terminal.
 **Option B: AppImage (portable)**
 
 ```bash
-chmod +x Higgs-Audio-v3-Studio_0.2.31_amd64.AppImage
-./Higgs-Audio-v3-Studio_0.2.31_amd64.AppImage
+chmod +x Higgs-Audio-v3-Studio_0.2.40_amd64.AppImage
+./Higgs-Audio-v3-Studio_0.2.40_amd64.AppImage
 ```
 
 **Option C: Raw binary (most portable, needs system WebKitGTK)**
@@ -574,7 +574,7 @@ Known-good Linux build inputs:
 | Rust | Stable toolchain |
 | Node.js | 20+ recommended |
 | WebKitGTK 4.1 | `libwebkit2gtk-4.1-dev` and related GTK dev packages |
-| `patchelf` | For setting rpath on the engine `.so` |
+| `patchelf` | For validating or repairing rpath on packaged engine libraries |
 
 </details>
 
@@ -650,7 +650,7 @@ source ~/.bashrc
 Clone and build:
 
 ```bash
-git clone --recursive https://github.com/Saganaki22/Higgs-Audio-v3-Studio.git
+git clone --branch linux --recurse-submodules https://github.com/Saganaki22/Higgs-Audio-v3-Studio.git
 cd Higgs-Audio-v3-Studio
 
 cmake -S . -B build/linux-cuda-release -G Ninja \
@@ -671,7 +671,8 @@ The shared library is written to:
 build/linux-cuda-release/app/desktop_api/libaudiocpp_engine.so
 ```
 
-Stage a self-contained engine package (includes CUDA runtime libs with `rpath=$ORIGIN`):
+Stage a self-contained engine package. The rebuilt engine carries `$ORIGIN` rpath;
+apply the same rpath to the copied CUDA libraries so they can resolve each other:
 
 ```bash
 mkdir -p ~/hf-higgs-studio/engines_linux
@@ -682,6 +683,11 @@ cp -L /usr/local/cuda/lib64/libcublas.so.13   ~/hf-higgs-studio/engines_linux/
 cp -L /usr/local/cuda/lib64/libcublasLt.so.13 ~/hf-higgs-studio/engines_linux/
 cp -L /usr/local/cuda/lib64/libcufft.so.13    ~/hf-higgs-studio/engines_linux/
 for f in ~/hf-higgs-studio/engines_linux/lib*.so*; do patchelf --set-rpath '$ORIGIN' "$f"; done
+readelf -d ~/hf-higgs-studio/engines_linux/libaudiocpp_engine.so | grep -E '\(RPATH\)|\(RUNPATH\)'
+if ldd ~/hf-higgs-studio/engines_linux/libaudiocpp_engine.so | grep -q 'not found'; then
+  echo "Engine package has unresolved Linux dependencies."
+  exit 1
+fi
 ```
 
 For development, copy the engine to:
@@ -752,8 +758,8 @@ Expected outputs:
 
 ```text
 desktop/src-tauri/target/release/higgs-audio-studio
-desktop/src-tauri/target/release/bundle/deb/Higgs Audio v3 Studio_0.2.31_amd64.deb
-desktop/src-tauri/target/release/bundle/appimage/Higgs Audio v3 Studio_0.2.31_amd64.AppImage
+desktop/src-tauri/target/release/bundle/deb/Higgs Audio v3 Studio_0.2.40_amd64.deb
+desktop/src-tauri/target/release/bundle/appimage/Higgs Audio v3 Studio_0.2.40_amd64.AppImage
 ```
 
 Build only the binary without installer bundles:
