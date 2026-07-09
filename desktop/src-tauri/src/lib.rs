@@ -191,7 +191,16 @@ fn engine_package_filenames() -> Vec<&'static str> {
             "libcudart.so.13",
             "libcublas.so.13",
             "libcublasLt.so.13",
+            "libcufft.so.13",
         ]
+    }
+}
+
+fn engine_library_word() -> &'static str {
+    if cfg!(windows) {
+        "DLLs"
+    } else {
+        "libraries"
     }
 }
 
@@ -495,7 +504,8 @@ fn resolve_engine_path(
 
     let download_dir = state.engine_dir();
     Err(format!(
-        "Engine library not found. Click Download Engine DLLs or copy {} into {}.",
+        "Engine library not found. Click Download Engine {} or copy {} into {}.",
+        engine_library_word(),
         engine_filename(),
         download_dir.display()
     ))
@@ -544,7 +554,12 @@ fn diagnose_engine_dependencies(
         diagnose_windows_engine_dependencies(engine_path, raw_error)
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        diagnose_linux_engine_dependencies(engine_path, raw_error)
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
     {
         EngineDependencyDiagnostic {
             ok: true,
@@ -730,7 +745,174 @@ fn windows_dependency_search_dirs(engine_path: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(target_os = "linux")]
+fn diagnose_linux_engine_dependencies(
+    engine_path: &Path,
+    raw_error: Option<&str>,
+) -> EngineDependencyDiagnostic {
+    let specs = linux_engine_dependency_specs();
+    let search_dirs = linux_dependency_search_dirs(engine_path);
+    let mut detected = Vec::new();
+    let mut missing = Vec::new();
+    let mut optional_missing = Vec::new();
+    let mut suggestions = Vec::new();
+
+    for spec in specs {
+        let found = find_dependency_pattern(&search_dirs, spec.pattern);
+        let status = EngineDependencyStatus {
+            name: spec.name.to_string(),
+            pattern: spec.pattern.to_string(),
+            category: spec.category.to_string(),
+            required: spec.required,
+            found_path: found.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            fix: spec.fix.to_string(),
+        };
+
+        if found.is_some() {
+            detected.push(status);
+        } else if spec.required {
+            if !suggestions.iter().any(|s| s == spec.fix) {
+                suggestions.push(spec.fix.to_string());
+            }
+            missing.push(status);
+        } else {
+            optional_missing.push(status);
+        }
+    }
+
+    EngineDependencyDiagnostic {
+        ok: missing.is_empty(),
+        platform: "linux".to_string(),
+        engine_path: engine_path.to_string_lossy().into_owned(),
+        detected,
+        missing,
+        optional_missing,
+        search_dirs: search_dirs
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        suggestions,
+        raw_error: raw_error.map(|e| e.to_string()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_engine_dependency_specs() -> Vec<EngineDependencySpec> {
+    vec![
+        EngineDependencySpec {
+            name: "NVIDIA CUDA driver",
+            pattern: "libcuda.so.1",
+            category: "NVIDIA driver",
+            required: true,
+            fix: "Install or update the NVIDIA Linux driver, then reboot.",
+        },
+        EngineDependencySpec {
+            name: "CUDA 13 runtime",
+            pattern: "libcudart.so.13",
+            category: "CUDA 13 runtime",
+            required: true,
+            fix: "Download Engine libraries in the app, or install CUDA Toolkit 13.x and make sure its lib64 folder is on LD_LIBRARY_PATH.",
+        },
+        EngineDependencySpec {
+            name: "CUDA 13 cuBLAS",
+            pattern: "libcublas.so.13",
+            category: "CUDA 13 runtime",
+            required: true,
+            fix: "Download Engine libraries in the app, or install CUDA Toolkit 13.x and make sure its lib64 folder is on LD_LIBRARY_PATH.",
+        },
+        EngineDependencySpec {
+            name: "CUDA 13 cuBLASLt",
+            pattern: "libcublasLt.so.13",
+            category: "CUDA 13 runtime",
+            required: true,
+            fix: "Download Engine libraries in the app, or install CUDA Toolkit 13.x and make sure its lib64 folder is on LD_LIBRARY_PATH.",
+        },
+        EngineDependencySpec {
+            name: "CUDA 13 cuFFT",
+            pattern: "libcufft.so.13",
+            category: "CUDA 13 runtime",
+            required: true,
+            fix: "Download Engine libraries in the app, or install CUDA Toolkit 13.x and make sure its lib64 folder is on LD_LIBRARY_PATH.",
+        },
+        EngineDependencySpec {
+            name: "NVIDIA Management Library",
+            pattern: "libnvidia-ml.so.1",
+            category: "NVIDIA telemetry",
+            required: false,
+            fix: "Install the NVIDIA Linux driver if hardware telemetry is unavailable.",
+        },
+        EngineDependencySpec {
+            name: "GNU OpenMP runtime",
+            pattern: "libgomp.so.1",
+            category: "OpenMP runtime",
+            required: false,
+            fix: "Install libgomp1 if OpenMP runtime loading fails.",
+        },
+    ]
+}
+
+#[cfg(target_os = "linux")]
+fn linux_dependency_search_dirs(engine_path: &Path) -> Vec<PathBuf> {
+    fn push_dir(dirs: &mut Vec<PathBuf>, dir: PathBuf) {
+        if !dir.exists() || !dir.is_dir() {
+            return;
+        }
+        let normalized = dir.to_string_lossy().to_string();
+        if dirs
+            .iter()
+            .any(|existing| existing.to_string_lossy() == normalized)
+        {
+            return;
+        }
+        dirs.push(dir);
+    }
+
+    let mut dirs = Vec::new();
+    if let Some(parent) = engine_path.parent() {
+        push_dir(&mut dirs, parent.to_path_buf());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            push_dir(&mut dirs, parent.to_path_buf());
+            push_dir(&mut dirs, parent.join("resources").join("engine"));
+            push_dir(&mut dirs, parent.join("..").join("lib"));
+        }
+    }
+
+    for key in ["CUDA_PATH", "CUDAToolkit_ROOT"] {
+        if let Some(root) = std::env::var_os(key) {
+            let root = PathBuf::from(root);
+            push_dir(&mut dirs, root.join("lib64"));
+            push_dir(&mut dirs, root.join("lib"));
+        }
+    }
+
+    if let Some(path) = std::env::var_os("LD_LIBRARY_PATH") {
+        for dir in std::env::split_paths(&path) {
+            push_dir(&mut dirs, dir);
+        }
+    }
+
+    for dir in [
+        "/usr/local/cuda/lib64",
+        "/usr/local/cuda/lib",
+        "/usr/local/cuda-13.3/lib64",
+        "/usr/local/cuda-13.2/lib64",
+        "/usr/local/cuda-13.1/lib64",
+        "/usr/local/cuda-13.0/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib64",
+        "/usr/lib",
+        "/lib/x86_64-linux-gnu",
+        "/lib64",
+        "/lib",
+    ] {
+        push_dir(&mut dirs, PathBuf::from(dir));
+    }
+
+    dirs
+}
+
 fn find_dependency_pattern(search_dirs: &[PathBuf], pattern: &str) -> Option<PathBuf> {
     if !pattern.contains('*') {
         for dir in search_dirs {

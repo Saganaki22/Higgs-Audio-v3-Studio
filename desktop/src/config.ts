@@ -14,6 +14,7 @@ export const IS_WINDOWS = _ua.includes("win");
 export const IS_MAC = _ua.includes("mac");
 export const IS_LINUX = !IS_WINDOWS && !IS_MAC;
 export const ENGINE_LIB_WORD = IS_WINDOWS ? "DLLs" : "libraries";
+export const ENGINE_LIB_SINGULAR = IS_WINDOWS ? "DLL" : "library";
 export const ENGINE_PACKAGE_URL = `${HIGGS_MODEL_RESOLVE_BASE}/engines${IS_WINDOWS ? "" : "_linux"}`;
 export const ENGINE_DLL_URL = `${ENGINE_PACKAGE_URL}/${IS_WINDOWS ? "audiocpp_engine.dll" : "libaudiocpp_engine.so"}`;
 export const WHISPER_MODELS_URL = "https://huggingface.co/ggerganov/whisper.cpp";

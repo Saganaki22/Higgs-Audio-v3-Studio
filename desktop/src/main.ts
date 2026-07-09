@@ -9,8 +9,9 @@ import {
   API_LOG_STORAGE_KEY,
   APP_VERSION,
   CUDA_DOWNLOAD_URL,
-  ENGINE_PACKAGE_URL,
+  ENGINE_LIB_SINGULAR,
   ENGINE_LIB_WORD,
+  ENGINE_PACKAGE_URL,
   ENGINE_PATH_STORAGE_KEY,
   FIRST_RUN_WIZARD_STORAGE_KEY,
   IS_WINDOWS,
@@ -664,7 +665,7 @@ function initSettings(): void {
     streamPlayback = streamToggle.checked;
     localStorage.setItem(STREAM_PLAYBACK_STORAGE_KEY, String(streamPlayback));
     if (streamPlayback && !engineSupportsStreaming) {
-      showToast(`Streaming needs an updated Higgs engine ${ENGINE_LIB_WORD.replace("s", "")}; current engine falls back to normal generation.`, "warning");
+      showToast(`Streaming needs an updated Higgs engine ${ENGINE_LIB_SINGULAR}; current engine falls back to normal generation.`, "warning");
     }
   });
   const trayToggle = el<HTMLInputElement>("#minimize-to-tray");

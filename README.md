@@ -82,6 +82,7 @@ drbaph/Higgs-Audio-v3-Studio/
     libcudart.so.13
     libcublas.so.13
     libcublasLt.so.13
+    libcufft.so.13
   models/
     higgs-q8_0/
       q8_0.gguf
@@ -280,6 +281,7 @@ Engine package downloaded by `Download Engine Files`:
     libcudart.so.13
     libcublas.so.13
     libcublasLt.so.13
+    libcufft.so.13
 ```
 
 Default downloaded model folders:
@@ -678,6 +680,7 @@ cp "$ENGINE_SO" ~/hf-higgs-studio/engines_linux/libaudiocpp_engine.so
 cp -L /usr/local/cuda/lib64/libcudart.so.13   ~/hf-higgs-studio/engines_linux/
 cp -L /usr/local/cuda/lib64/libcublas.so.13   ~/hf-higgs-studio/engines_linux/
 cp -L /usr/local/cuda/lib64/libcublasLt.so.13 ~/hf-higgs-studio/engines_linux/
+cp -L /usr/local/cuda/lib64/libcufft.so.13    ~/hf-higgs-studio/engines_linux/
 for f in ~/hf-higgs-studio/engines_linux/lib*.so*; do patchelf --set-rpath '$ORIGIN' "$f"; done
 ```
 

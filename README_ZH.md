@@ -71,6 +71,7 @@ drbaph/Higgs-Audio-v3-Studio/
     libcudart.so.13
     libcublas.so.13
     libcublasLt.so.13
+    libcufft.so.13
   models/
     higgs-q8_0/
       q8_0.gguf
@@ -166,6 +167,7 @@ C:\Users\<you>\audiocpp\models\
     libcudart.so.13
     libcublas.so.13
     libcublasLt.so.13
+    libcufft.so.13
 ```
 
 引擎 `.so` 文件使用 `rpath=$ORIGIN`，所以能自动找到同目录下的 CUDA 运行时
