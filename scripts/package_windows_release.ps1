@@ -3,8 +3,7 @@ param(
     [string]$Version,
     [switch]$SkipBuild,
     [switch]$SkipUpx,
-    [string]$UpxPath,
-    [string]$EnginePackageDir
+    [string]$UpxPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,32 +11,12 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $desktopRoot = Join-Path $repoRoot "desktop"
 $tauriRoot = Join-Path $desktopRoot "src-tauri"
 $releaseRoot = Join-Path $tauriRoot "target\release"
-$resourceEngineDir = Join-Path $tauriRoot "resources\engine"
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $package = Get-Content (Join-Path $desktopRoot "package.json") -Raw | ConvertFrom-Json
     $Version = [string]$package.version
 }
 $Version = $Version.TrimStart("v")
-
-New-Item -ItemType Directory -Path $resourceEngineDir -Force | Out-Null
-if ($EnginePackageDir) {
-    $resolvedEnginePackage = [System.IO.Path]::GetFullPath($EnginePackageDir)
-    if (-not (Test-Path -LiteralPath $resolvedEnginePackage -PathType Container)) {
-        throw "Engine package directory not found: $resolvedEnginePackage"
-    }
-    Get-ChildItem -LiteralPath $resolvedEnginePackage -Filter "*.dll" -File |
-        Where-Object { $_.Name -notlike "*.backup-*.dll" } |
-        Copy-Item -Destination $resourceEngineDir -Force
-}
-
-$nativeEngine = Join-Path $repoRoot "build\windows-cuda-release\bin\audiocpp_engine.dll"
-if (Test-Path -LiteralPath $nativeEngine) {
-    Copy-Item -LiteralPath $nativeEngine -Destination (Join-Path $resourceEngineDir "audiocpp_engine.dll") -Force
-}
-if (-not (Test-Path -LiteralPath (Join-Path $resourceEngineDir "audiocpp_engine.dll"))) {
-    throw "audiocpp_engine.dll is missing. Build the native engine or pass -EnginePackageDir."
-}
 
 if (-not $SkipBuild) {
     Push-Location $desktopRoot
@@ -67,6 +46,11 @@ if (Test-Path -LiteralPath $portableDir) {
 New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
 Copy-Item -LiteralPath $sourceExe -Destination (Join-Path $portableDir "Higgs Audio v3 Studio.exe")
 Copy-Item -LiteralPath $sourceResources -Destination (Join-Path $portableDir "resources") -Recurse
+$portableEngineDir = Join-Path $portableDir "resources\engine"
+if (Test-Path -LiteralPath $portableEngineDir) {
+    Remove-Item -LiteralPath $portableEngineDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $portableEngineDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableDir "models") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableDir "data\speakers") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableDir "data\temp") -Force | Out-Null

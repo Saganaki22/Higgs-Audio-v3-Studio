@@ -114,7 +114,7 @@ Higgs Audio v3 Studio 0.3.0 Portable/
   Higgs Audio v3 Studio.exe
   portable.flag
   resources/
-    engine/                       # 引擎及 CUDA/MSVC runtime DLL
+    engine/                       # 点击 Download Engine DLLs 后写入
     higgs-assets/                 # Higgs config/tokenizer 资源
     api-console/                  # 浏览器 API 测试控制台
   models/                         # Higgs 与 Whisper 下载
@@ -124,9 +124,11 @@ Higgs Audio v3 Studio 0.3.0 Portable/
     webview/                      # 设置、API key 与 WebView2 状态
 ```
 
-便携版已经包含原生引擎/runtime DLL 与 Higgs 支持资源，但不包含数 GB 的
-GGUF 权重。点击模型或 Whisper 下载后，文件会保存到便携版的 `models/`
-目录。移动整个便携版目录到另一个可写磁盘时，应用数据也会一起移动。
+便携版包含 Higgs 支持资源与 API 测试控制台，但不打包原生引擎/runtime DLL，
+也不包含数 GB 的 GGUF 权重。点击 `Download Engine DLLs` 后，引擎包会从
+Hugging Face 下载到 `resources/engine/`。模型或 Whisper 文件会保存到便携版
+的 `models/` 目录。移动整个便携版目录到另一个可写磁盘时，应用数据也会
+一起移动。
 
 NSIS 与 MSI 都属于安装版。程序和打包的只读资源位于 Windows 安装目录，
 可变下载与用户数据则写入当前用户可写目录，从而避免在 `Program Files`
@@ -334,12 +336,12 @@ Windows CUDA DLL：
 Tauri 打包：
 
 ```powershell
-.\scripts\package_windows_release.ps1 `
-  -EnginePackageDir "C:\path\to\your\engines"
+.\scripts\package_windows_release.ps1
 ```
 
 该脚本会构建 MSI、NSIS 和自包含便携目录；只有便携目录会得到
-`portable.flag`。如果系统能找到 `upx.exe`，脚本只压缩便携版 EXE。
+`portable.flag`。如果系统能找到 `upx.exe`，脚本只压缩便携版 EXE。所有应用
+安装包都会排除引擎 DLL；用户需要时通过应用从 Hugging Face `engines/` 下载。
 
 ## 常见问题
 

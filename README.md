@@ -213,7 +213,7 @@ Higgs Audio v3 Studio 0.3.0 Portable/
   Higgs Audio v3 Studio.exe
   portable.flag
   resources/
-    engine/                       # engine plus CUDA/MSVC runtime DLLs
+    engine/                       # empty until Download Engine DLLs is used
     higgs-assets/                 # bundled Higgs config/tokenizer assets
     api-console/                  # bundled browser API test console
   models/
@@ -225,10 +225,12 @@ Higgs Audio v3 Studio 0.3.0 Portable/
     webview/                      # settings, API key, and WebView2 profile
 ```
 
-The portable package includes the native engine/runtime DLLs and Higgs support
-assets, but not the multi-gigabyte GGUF weights. Clicking a model or Whisper
-download stores those files under the portable `models/` folder. Moving the
-complete portable directory to another writable drive keeps its data with it.
+The portable package includes Higgs support assets and the API test console, but
+does not bundle the native engine/runtime DLLs or multi-gigabyte GGUF weights.
+`Download Engine DLLs` fetches the engine package from Hugging Face into
+`resources/engine/`. Model and Whisper downloads are stored under `models/`.
+Moving the complete portable directory to another writable drive keeps its data
+with it.
 
 NSIS and MSI are installed builds. Their signed application files and bundled
 read-only resources live in the Windows installation directory, while mutable
@@ -403,7 +405,7 @@ an API restart after create/edit/delete.
    Higgs Audio v3 Studio 0.3.0 Portable/
      Higgs Audio v3 Studio.exe
      portable.flag
-     resources/engine/       # engine and CUDA/MSVC runtime DLLs
+     resources/engine/       # populated by Download Engine DLLs
      models/                 # Higgs and Whisper downloads
      data/speakers/          # saved speaker identities and caches
      data/temp/              # prepared and recorded reference audio
@@ -554,21 +556,20 @@ For development, copy it to:
 desktop/src-tauri/resources/engine/audiocpp_engine.dll
 ```
 
-For portable release builds, place it beside the final executable.
+The native DLL is for development and the Hugging Face `engines/` package. It is
+intentionally not embedded in NSIS, MSI, or portable application releases.
 
 To produce MSI, NSIS, and a self-contained portable folder in one pass, use:
 
 ```powershell
-.\scripts\package_windows_release.ps1 `
-  -EnginePackageDir "C:\path\to\your\engines"
+.\scripts\package_windows_release.ps1
 ```
 
 The script adds `portable.flag` only to the portable folder. It optionally runs
 UPX on the copied portable executable when `upx.exe` is available; installer
 builds continue to use Tauri's normal MSI/NSIS compression and storage paths.
-The engine package directory supplies the CUDA/MSVC companion DLLs; the script
-then replaces its `audiocpp_engine.dll` with the current
-`build/windows-cuda-release/bin/audiocpp_engine.dll` before building packages.
+Engine DLLs are intentionally excluded from every application package and are
+downloaded from the Hugging Face `engines/` folder on demand.
 
 </details>
 
