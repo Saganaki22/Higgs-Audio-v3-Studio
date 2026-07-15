@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.4` is a Windows desktop app built with Rust/Tauri for
+Higgs Audio v3 Studio `0.3.0` is a Windows desktop app built with Rust/Tauri for
 local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
 app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
 loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
@@ -111,14 +111,18 @@ Hugging Face repo root so the runtime links resolve under `/resolve/main/...`.
 - Runs the ported Higgs Audio v3 C++/CUDA engine inside a Tauri desktop app.
 - Supports normal TTS, voice cloning, speech continuation, and multi-speaker workflows.
 - Supports reference voice drag/drop, replacement, waveform previews, remove buttons, and automatic 30-second reference preparation for voice cloning and Speaker Gallery uploads.
+- Records reference voices directly from a selected microphone in Voice Clone, Continue Speech, Speaker Gallery, and each Multi Speaker voice card, with a live waveform, stop/replace controls, and a 30-second safety limit.
+- Trims reference audio with selectable start/end points and selection playback in Voice Clone, Continue Speech, Speaker Gallery, Multi Speaker identities, and line-specific overrides; applying a trim replaces the actual Higgs/Whisper input and invalidates stale speaker caches.
+- Decodes Telegram/WhatsApp OGG/Opus and WebM/Opus reference audio natively, without requiring FFmpeg or an external codec installation.
 - Supports optional live streaming playback during generation, with de-clicked chunk edges, waveform scrubbing, and play/pause control for the live stream.
 - Supports optional Whisper auto-transcription for reference transcripts.
 - Includes a Whisper model selector with direct `whisper.cpp` model downloads.
 - Includes a Speaker Gallery for reusable speaker identities with reference audio, transcript, notes, display image, normalization, and selected-speaker ZIP import/export.
 - Reuses saved speaker reference caches (`.hspkcache`) after first inference to skip repeated reference-code preparation.
 - Includes per-line speaker assignment, draggable line ordering, speaker-line pauses, line-by-line generation progress, and preflight validation for missing speaker references.
+- Shows live generated-token progress beside elapsed time whenever the native engine reports token totals.
 - Includes a visible generation queue manager for queued UI jobs, with active-job status, edit, delete, and clear controls.
-- Includes a local API with normal WAV/MP3 responses, NDJSON streaming responses, saved-speaker discovery, and a detachable Command Centre log window.
+- Includes a local API with normal WAV/MP3 responses, NDJSON streaming responses, saved-speaker discovery, a detachable Command Centre log window, and a bundled browser test console.
 - Exposes generation controls such as temperature, top-k, top-p, seed mode, max tokens, chunking, emotion, style, speed, pitch, and expressiveness.
 - Exports generated audio as WAV or MP3.
 - Tracks recent generations per mode.
@@ -173,6 +177,7 @@ Tauri Web UI
 Important boundary:
 
 - UI code lives in `desktop/src`.
+- Reference microphone state, device selection, live metering, and recorder controls live in `desktop/src/referenceRecorder.ts` instead of the application bootstrap.
 - Rust command glue lives in `desktop/src-tauri/src`.
 - Native C ABI lives in `app/desktop_api/audiocpp_api.h`.
 - Native DLL implementation lives in `app/desktop_api/audiocpp_api.cpp`.
@@ -188,66 +193,54 @@ responsive while the native engine is generating audio.
 <details open>
 <summary>Runtime file locations</summary>
 
-Portable/packaged app folder:
+The three Windows packages run the same application, but they use two different
+storage modes:
+
+| Package | Program files | Engine downloads | Model downloads | Settings, speakers, and temporary audio |
+| --- | --- | --- | --- | --- |
+| Portable folder | Beside the EXE | `resources/engine/` beside the EXE | `models/` beside the EXE | `data/` beside the EXE |
+| NSIS setup EXE | Installed by the NSIS wizard | `%LOCALAPPDATA%\Higgs Audio v3 Studio\engine\` | `%USERPROFILE%\audiocpp\models\` | Windows per-user app-data/temp folders |
+| MSI installer | Installed through Windows Installer | `%LOCALAPPDATA%\Higgs Audio v3 Studio\engine\` | `%USERPROFILE%\audiocpp\models\` | Windows per-user app-data/temp folders |
+
+The portable release is self-contained for all Studio-managed writable data.
+Keep the complete folder together and launch the EXE from a writable location.
+The `portable.flag` marker switches engine/model downloads, settings, saved
+speakers, reference caches, recordings, temporary audio, and WebView data into
+the portable directory:
 
 ```text
-Higgs Audio v3 Studio.exe
-resources/
-  engine/
-    audiocpp_engine.dll          # bundled main engine DLL
-  higgs-assets/
-    higgs-audio-v3-tts-4b/
-      config/tokenizer assets
+Higgs Audio v3 Studio 0.3.0 Portable/
+  Higgs Audio v3 Studio.exe
+  portable.flag
+  resources/
+    engine/                       # engine plus CUDA/MSVC runtime DLLs
+    higgs-assets/                 # bundled Higgs config/tokenizer assets
+    api-console/                  # bundled browser API test console
+  models/
+    higgs-q8_0/                   # downloaded GGUF plus model assets
+    whisper/                      # optional Whisper downloads
+  data/
+    speakers/                     # identities, images, audio, transcripts, caches
+    temp/                         # prepared/recorded reference audio
+    webview/                      # settings, API key, and WebView2 profile
 ```
 
-Engine package downloaded by `Download Engine DLLs`:
+The portable package includes the native engine/runtime DLLs and Higgs support
+assets, but not the multi-gigabyte GGUF weights. Clicking a model or Whisper
+download stores those files under the portable `models/` folder. Moving the
+complete portable directory to another writable drive keeps its data with it.
 
-```text
-%LOCALAPPDATA%/
-  Higgs Audio v3 Studio/
-    engine/
-      audiocpp_engine.dll
-      cublas64_13.dll
-      cublasLt64_13.dll
-      MSVCP140.dll
-      VCOMP140.DLL
-      VCRUNTIME140.dll
-      VCRUNTIME140_1.dll
-```
+NSIS and MSI are installed builds. Their signed application files and bundled
+read-only resources live in the Windows installation directory, while mutable
+downloads and user data are deliberately stored in writable per-user folders.
+This avoids `Access is denied` errors under `Program Files`. NSIS is the normal
+guided setup EXE; MSI uses Windows Installer and is useful for managed deployment,
+repair, or MSI-based uninstall tooling. Their runtime behavior is otherwise the
+same.
 
-Default downloaded model folders:
-
-```text
-models/
-  higgs-q8_0/
-    q8_0.gguf
-    config/tokenizer/chat-template assets
-  higgs-q6_k/
-    q6_k.gguf
-    config/tokenizer/chat-template assets
-  higgs-q5_k/
-    q5_k.gguf
-    config/tokenizer/chat-template assets
-  higgs-q4_k_m/
-    q4_k_m.gguf
-    config/tokenizer/chat-template assets
-  higgs-bf16/
-    bf16.gguf
-    config/tokenizer/chat-template assets
-models/whisper/
-  ggml-base.en-q8_0.bin      # optional, used by auto-transcribe
-```
-
-For packaged/portable builds, keep the `resources/` folder beside the executable.
-For development, place the engine DLL in `desktop/src-tauri/resources/engine/`.
-
-The in-app `Download Engine DLLs` button downloads the engine package into the
-per-user app data engine folder, which avoids Windows permission errors when the
-app is installed under `Program Files`. The package includes
-`audiocpp_engine.dll`, cuBLAS/cuBLASLt CUDA 13 runtime DLLs, and the MSVC/OpenMP
-runtime DLLs required by the current engine build. Bundled/portable resources
-and system-installed CUDA/MSVC runtime folders are still checked automatically
-when present.
+For development, place the engine DLL in
+`desktop/src-tauri/resources/engine/`. Engine discovery also checks bundled
+resources and compatible system-installed CUDA/MSVC runtime folders.
 
 </details>
 
@@ -263,6 +256,13 @@ uploads are automatically prepared as WAV and capped to the first 30 seconds so
 long accidental uploads do not waste inference setup time. Continue Speech keeps
 the full source audio because that workflow may intentionally continue longer
 material.
+
+The same reference slots can record from a microphone without leaving the app.
+Choose an input device, press record, and watch the live level waveform. Stopping
+the recording prepares a mono WAV and replaces that slot only after the file has
+been finalized successfully. Recording is available in Voice Clone, Continue
+Speech, Speaker Gallery, and every Multi Speaker voice card. Whisper transcription
+remains optional; the recorder does not perform speaker diarization.
 
 When a speaker identity is created or edited, the app keeps its files in the
 user app data speaker store. Each speaker gets a folder named from the speaker
@@ -290,8 +290,13 @@ Speaker export/import includes identity metadata, reference audio, transcript,
 notes, display images, and the saved `.hspkcache` reference-code cache when it
 exists. The cache is created after the first saved-speaker inference and is used
 again by Voice Clone, Continue Speech, Multi Speaker, and saved-speaker API jobs.
-Model-internal KV-prefix/activation caches are intentionally not serialized,
-because those are model/quant specific.
+The file stores discrete codec IDs rather than model KV tensors. The official
+Q4_K_M, Q5_K, Q6_K, Q8_0, and BF16 builds made from the same source model with
+the default `higgs_tts` quantization policy can therefore share one speaker
+cache because that policy preserves the codec encoder tensors. Regenerate the
+cache for a different model/codec revision, fine-tune, or custom `--policy all`
+quant. Model-internal KV-prefix/activation caches are intentionally not
+serialized because those are model and quant specific.
 
 </details>
 
@@ -362,7 +367,12 @@ with requests.post(url, headers=headers, json=payload, stream=True, timeout=600)
                 open("final.wav", "wb").write(base64.b64decode(event["wavBase64"]))
 ```
 
-The API tab includes examples for curl, Python, JavaScript, and PowerShell. Its
+The API tab includes examples for curl, Python, JavaScript, and PowerShell. The
+`Test Console` button opens a bundled, self-contained test harness in the system
+browser with the current API base URL; the app also copies the current API key
+to the clipboard for pasting into the console. The console can run health/status
+checks and exercise plain TTS, reference or saved-speaker cloning, continuation,
+WAV/MP3 finished responses, and NDJSON streaming. Its
 Command Centre can be popped out into a separate window with filters for info,
 warnings, errors, requests, and jobs. If the main studio window is minimized to
 the system tray, the popped-out Command Centre remains visible. Speaker Gallery
@@ -384,20 +394,38 @@ an API restart after create/edit/delete.
    ```
 
 3. Keep the `resources/` folder beside `Higgs Audio v3 Studio.exe`.
-4. Run `Higgs Audio v3 Studio.exe`.
-5. If the engine package is missing, click `Download Engine DLLs`.
-6. Use the Model panel to download or browse to a Higgs model.
-7. Load the engine and model.
+4. Keep `portable.flag` beside the executable. This marker prevents the portable
+   app from writing its runtime data into the Windows user profile.
+5. Run `Higgs Audio v3 Studio.exe`.
+6. The portable app creates and uses only these local writable folders:
+
+   ```text
+   Higgs Audio v3 Studio 0.3.0 Portable/
+     Higgs Audio v3 Studio.exe
+     portable.flag
+     resources/engine/       # engine and CUDA/MSVC runtime DLLs
+     models/                 # Higgs and Whisper downloads
+     data/speakers/          # saved speaker identities and caches
+     data/temp/              # prepared and recorded reference audio
+     data/webview/           # settings, API key, and WebView2 state
+   ```
+
+7. If the engine package is missing, click `Download Engine DLLs`.
+8. Use the Model panel to download or browse to a Higgs model.
+9. Load the engine and model.
 
 </details>
 
 <details>
-<summary>Installer</summary>
+<summary>NSIS and MSI installers</summary>
 
-1. Download the `.exe` or `.msi` installer from GitHub Releases.
-2. Install normally.
+1. Download the NSIS `*_x64-setup.exe` for a normal guided installation, or the
+   `*_x64_en-US.msi` for Windows Installer/managed deployment.
+2. Install normally. Both packages install the same app and bundled resources.
 3. Launch the app from the Start Menu.
-4. Download or browse to the engine/model files from inside the app.
+4. Download or browse to the engine/model files from inside the app. Downloads,
+   settings, speakers, and temporary files use writable per-user locations, not
+   the protected application installation folder.
 
 </details>
 
@@ -528,6 +556,20 @@ desktop/src-tauri/resources/engine/audiocpp_engine.dll
 
 For portable release builds, place it beside the final executable.
 
+To produce MSI, NSIS, and a self-contained portable folder in one pass, use:
+
+```powershell
+.\scripts\package_windows_release.ps1 `
+  -EnginePackageDir "C:\path\to\your\engines"
+```
+
+The script adds `portable.flag` only to the portable folder. It optionally runs
+UPX on the copied portable executable when `upx.exe` is available; installer
+builds continue to use Tauri's normal MSI/NSIS compression and storage paths.
+The engine package directory supplies the CUDA/MSVC companion DLLs; the script
+then replaces its `audiocpp_engine.dll` with the current
+`build/windows-cuda-release/bin/audiocpp_engine.dll` before building packages.
+
 </details>
 
 ## Build Desktop App
@@ -606,8 +648,13 @@ Expected behavior:
 - `Load Engine` changes the engine chip from unloaded to loaded.
 - `Load Model` enables generation after a valid model folder is selected.
 - Voice clone and multi-speaker workflows require reference audio. New uploaded clone/Speaker Gallery references are auto-cropped to 30 seconds.
+- Microphone input selection, live recording waveform, stop, replace, and remove controls work in Voice Clone, Continue Speech, Speaker Gallery, and Multi Speaker voice cards.
+- Reference trim controls preview a selected range, enforce the 30-second cloning limit, write a new WAV, and refresh the reference/cache state used by generation.
 - Multi-speaker generation checks all speech lines before starting. If a line points to a missing speaker or a speaker without a reference voice, the app stops immediately and tells you which line to fix.
 - Whisper auto-transcription requires a selected `ggml-*.bin` Whisper model.
+- OGG/Opus and WebM/Opus references should load directly. Corrupt, empty, unsupported multi-stream, or unsupported multichannel Opus files return a specific decode error instead of an empty waveform.
+- Generation progress shows `Tokens current / maximum` beside elapsed time when token telemetry is available.
+- `Test Console` opens the bundled API harness in the default browser and pre-fills the current API root URL.
 
 </details>
 
@@ -753,6 +800,7 @@ This desktop app builds on:
 - The ported Higgs Audio v3 C++/CUDA engine implemented for this Studio app.
 - `ggml`, used by the native backend.
 - `whisper.cpp`, used for optional local transcription.
+- `libopus` through the Rust `audiopus` bindings, statically linked for native OGG/WebM Opus reference decoding.
 - Higgs Audio v3 model work from Boson AI.
 - Tauri 2, Rust, Vite, and TypeScript for the desktop shell.
 

@@ -50,6 +50,28 @@ import {
   setProgress,
   setText,
 } from "./dom";
+import {
+  initReferenceRecorder,
+  redrawReferenceRecorders,
+  referenceRecorderMarkup,
+  refreshReferenceRecorderUi,
+  syncReferenceRecorderUi,
+  type ReferenceRecordingContext,
+} from "./referenceRecorder";
+import {
+  initReferenceTrimmer,
+  openReferenceTrimmer,
+  type ReferenceTrimContext,
+  type ReferenceTrimResult,
+  type ReferenceTrimSource,
+} from "./referenceTrimmer";
+import {
+  getStoredPath,
+  initStorageLayout,
+  resolveStoredPath,
+  setStoredPath,
+  storePortablePath,
+} from "./storage";
 import type {
   ApiExampleKind,
   ApiLogEntry,
@@ -75,6 +97,7 @@ import type {
   ProgressEvent,
   RefPlayer,
   RefPreviewKind,
+  RecordingResult,
   SaveFormat,
   SpeakerPersona,
   StudioJobEvent,
@@ -119,6 +142,8 @@ let activeGenerationJob: GenerationJob | null = null;
 const generationQueue: GenerationJob[] = [];
 const externalStudioJobs = new Map<string, StudioJobEvent>();
 let generationProgressPrefix = "Elapsed";
+let generationTokenCurrent = 0;
+let generationTokenTotal = 0;
 let activeDownloadKind: DownloadKind = "model";
 let downloadActive = false;
 let downloadPaused = false;
@@ -361,7 +386,7 @@ async function refreshSetupWizardState(): Promise<void> {
     engineStatus = null;
   }
 
-  const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+  const savedEnginePath = getStoredPath(ENGINE_PATH_STORAGE_KEY);
   const bundledEnginePath = await invoke<string | null>("bundled_engine_path").catch(() => null);
   let enginePath = savedEnginePath || bundledEnginePath || "";
   let engineReady = Boolean(engineStatus?.engineLoaded);
@@ -406,11 +431,11 @@ async function refreshSetupWizardState(): Promise<void> {
     models = [];
   }
   const modelSelect = el<HTMLSelectElement>("#model-select");
-  let selectedModel = modelSelect.value || localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+  let selectedModel = modelSelect.value || getStoredPath(MODEL_PATH_STORAGE_KEY);
   if (!selectedModel && models.length > 0) {
     const recommended = [...models].sort((a, b) => modelSortRank(a) - modelSortRank(b))[0];
     selectedModel = recommended.path;
-    localStorage.setItem(MODEL_PATH_STORAGE_KEY, selectedModel);
+    setStoredPath(MODEL_PATH_STORAGE_KEY, selectedModel);
     addLocalModelOption(selectedModel, modelDisplayName(recommended));
   }
   const modelReady = Boolean(engineStatus?.modelLoaded || selectedModel || models.length > 0);
@@ -431,7 +456,7 @@ async function refreshSetupWizardState(): Promise<void> {
   );
   el<HTMLButtonElement>("#setup-wizard-load-model").disabled = !selectedModel || Boolean(engineStatus?.modelLoaded);
 
-  const whisperPath = localStorage.getItem("higgsAudio.whisperModel") || "";
+  const whisperPath = getStoredPath("higgsAudio.whisperModel");
   setSetupCheck(
     "#setup-check-whisper",
     "#setup-whisper-icon",
@@ -760,7 +785,7 @@ function setTtsDownloadPreset(preset: TtsModelPreset, syncUrl = true): void {
 
 function setWhisperModelPath(path: string): void {
   el<HTMLInputElement>("#whisper-model-path").value = path;
-  localStorage.setItem("higgsAudio.whisperModel", path);
+  setStoredPath("higgsAudio.whisperModel", path);
 }
 
 function whisperPresetFilename(preset: WhisperModelPreset): string {
@@ -794,7 +819,7 @@ function initWhisperPanel(): void {
   const whisperInput = el<HTMLInputElement>("#whisper-model-path");
   const whisperSelect = el<HTMLSelectElement>("#whisper-model-select");
   populateWhisperModelSelect();
-  whisperInput.value = localStorage.getItem("higgsAudio.whisperModel") || "";
+  whisperInput.value = getStoredPath("higgsAudio.whisperModel");
   whisperInput.addEventListener("change", () => setWhisperModelPath(whisperInput.value.trim()));
   whisperSelect.addEventListener("change", () => {
     localStorage.setItem("higgsAudio.whisperPreset", whisperSelect.value);
@@ -1080,6 +1105,26 @@ function initApiPanel(): void {
   renderApiExample();
 
   el("#api-status-button").addEventListener("click", () => switchMode("api"));
+  el("#api-open-console-btn").addEventListener("click", async () => {
+    const apiKey = el<HTMLInputElement>("#api-key").value.trim();
+    let keyCopied = false;
+    if (apiKey) {
+      try {
+        await navigator.clipboard.writeText(apiKey);
+        keyCopied = true;
+      } catch {
+        keyCopied = false;
+      }
+    }
+    try {
+      await invoke("open_api_console", { baseUrl: getApiRootUrl() });
+      showToast(keyCopied
+        ? "API test console opened in your browser; the API key is on your clipboard"
+        : "API test console opened in your browser");
+    } catch (e) {
+      showToast(`Could not open API test console: ${e}`, "error");
+    }
+  });
   el("#api-info-btn").addEventListener("click", () => {
     const panel = el<HTMLElement>("#api-docs-panel");
     const hidden = panel.classList.toggle("hidden");
@@ -1316,7 +1361,7 @@ async function refreshModelList(): Promise<void> {
       return rank !== 0 ? rank : a.name.localeCompare(b.name);
     });
     const select = el<HTMLSelectElement>("#model-select");
-    const currentVal = select.value || localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+    const currentVal = select.value || getStoredPath(MODEL_PATH_STORAGE_KEY);
     select.innerHTML = '<option value="">Select a model…</option>';
     for (const m of sortedModels) {
       const opt = document.createElement("option");
@@ -1339,7 +1384,7 @@ async function refreshModelList(): Promise<void> {
 
 async function doLoadEngine(libraryPath?: string): Promise<void> {
   try {
-    const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+    const savedEnginePath = getStoredPath(ENGINE_PATH_STORAGE_KEY);
     const bundled = libraryPath ? null : await invoke<string | null>("bundled_engine_path");
     let libPath = libraryPath || savedEnginePath || bundled || undefined;
     let diagnostic = await diagnoseEngineForPath(libPath);
@@ -1357,7 +1402,7 @@ async function doLoadEngine(libraryPath?: string): Promise<void> {
       libraryPath: libPath,
     });
     if (result.success) {
-      if (libPath) localStorage.setItem(ENGINE_PATH_STORAGE_KEY, libPath);
+      if (libPath) setStoredPath(ENGINE_PATH_STORAGE_KEY, libPath);
       engineSupportsStreaming = Boolean(result.supportsStreaming);
       setText("#engine-chip", "Engine loaded");
       el<HTMLElement>("#engine-chip").classList.add("active");
@@ -1365,7 +1410,7 @@ async function doLoadEngine(libraryPath?: string): Promise<void> {
       await refreshModelList();
     }
   } catch (e) {
-    const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+    const savedEnginePath = getStoredPath(ENGINE_PATH_STORAGE_KEY);
     const bundled = await invoke<string | null>("bundled_engine_path").catch(() => null);
     const diagnostic = await diagnoseEngineForPath(libraryPath || savedEnginePath || bundled || undefined);
     if (diagnostic) {
@@ -1381,7 +1426,7 @@ async function doBrowseEngine(): Promise<string | null> {
   });
   const path = Array.isArray(selected) ? selected[0] : selected;
   if (!path) return null;
-  localStorage.setItem(ENGINE_PATH_STORAGE_KEY, path);
+  setStoredPath(ENGINE_PATH_STORAGE_KEY, path);
   showToast(`Selected engine: ${path.split(/[/\\]/).pop() || path}`);
   return path;
 }
@@ -1443,7 +1488,7 @@ async function doUnloadModel(): Promise<void> {
 }
 
 function initModelPanel(): void {
-  const savedModelPath = localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+  const savedModelPath = getStoredPath(MODEL_PATH_STORAGE_KEY);
   if (savedModelPath) addLocalModelOption(savedModelPath);
   el("#load-engine-btn").addEventListener("click", () => {
     void doLoadEngine();
@@ -1453,7 +1498,7 @@ function initModelPanel(): void {
   el("#browse-model-btn").addEventListener("click", doBrowseModel);
   el<HTMLSelectElement>("#model-select").addEventListener("change", () => {
     const value = el<HTMLSelectElement>("#model-select").value;
-    if (value) localStorage.setItem(MODEL_PATH_STORAGE_KEY, value);
+    if (value) setStoredPath(MODEL_PATH_STORAGE_KEY, value);
     const popover = document.querySelector<HTMLDivElement>("#download-popover");
     if (!downloadActive && activeDownloadKind === "model" && popover && !popover.hidden) {
       setTtsDownloadPreset(inferTtsPresetFromModelSelection(), true);
@@ -1467,7 +1512,7 @@ async function doBrowseModel(): Promise<string | null> {
 
   const dirPath = Array.isArray(selected) ? selected[0] : selected;
   const dirName = dirPath.split(/[/\\]/).pop() || dirPath;
-  localStorage.setItem(MODEL_PATH_STORAGE_KEY, dirPath);
+  setStoredPath(MODEL_PATH_STORAGE_KEY, dirPath);
 
   // Check for model files
   let hasWeights = false;
@@ -1532,7 +1577,7 @@ function setupDropzone(
       return;
     }
     const selected = await open({
-      filters: [{ name: "Audio", extensions: ["wav", "mp3", "flac", "m4a", "ogg", "webm"] }],
+      filters: [{ name: "Audio", extensions: ["wav", "mp3", "flac", "m4a", "ogg", "opus", "webm"] }],
     });
     if (selected) {
       const name = selected.split(/[/\\]/).pop() || selected;
@@ -1570,12 +1615,14 @@ function setDropzoneFile(dropzoneId: string, name: string): void {
       <button class="dropzone-remove" type="button" aria-label="Remove audio">✕</button>
       <span class="dropzone-hint">Drop another audio file to replace it</span>
     </div>`;
+  syncReferenceRecorderUi();
 }
 
 function clearDropzone(dropzoneId: string): void {
   const dz = el<HTMLElement>(dropzoneId);
   dz.classList.remove("has-file", "drag-over");
   dz.innerHTML = dz.dataset.emptyHtml || "";
+  syncReferenceRecorderUi();
 }
 
 function clearAllDropzoneHover(): void {
@@ -1772,6 +1819,8 @@ function initRefPlayer(kind: RefPreviewKind): void {
     waveformPath: "",
     waveformLoading: false,
     raf: null,
+    previewObjectUrl: null,
+    previewToken: 0,
   };
   player.audio.preload = "metadata";
   player.play.addEventListener("click", async () => {
@@ -1816,11 +1865,36 @@ function showRefPreview(kind: RefPreviewKind, path: string): void {
   preview.classList.remove("hidden");
   player.audio.pause();
   stopRefLoop(kind);
-  player.audio.src = convertFileSrc(path);
-  player.audio.load();
+  clearRefAudioSource(player);
   player.seek.value = "0";
+  const previewToken = player.previewToken;
+  void (async () => {
+    try {
+      const decoded = await invoke<GenerationResult>("read_audio_as_wav", { audioPath: path });
+      if (previewToken !== player.previewToken) return;
+      const blob = await base64ToBlobAsync(decoded.wavBase64, "audio/wav");
+      if (previewToken !== player.previewToken) return;
+      player.previewObjectUrl = URL.createObjectURL(blob);
+      player.audio.src = player.previewObjectUrl;
+      player.audio.load();
+    } catch {
+      if (previewToken !== player.previewToken) return;
+      player.audio.src = convertFileSrc(path);
+      player.audio.load();
+    }
+  })();
   void loadRefWaveform(kind, path);
   updateRefPlayback(kind);
+}
+
+function clearRefAudioSource(player: RefPlayer): void {
+  player.previewToken += 1;
+  player.audio.removeAttribute("src");
+  player.audio.load();
+  if (player.previewObjectUrl) {
+    URL.revokeObjectURL(player.previewObjectUrl);
+    player.previewObjectUrl = null;
+  }
 }
 
 function refreshVisibleRefPreview(kind: RefPreviewKind): void {
@@ -1839,6 +1913,7 @@ function redrawAllRefPreviews(): void {
   for (const kind of ["clone", "finish", "gallery"] as RefPreviewKind[]) {
     refreshVisibleRefPreview(kind);
   }
+  redrawReferenceRecorders();
 }
 
 function hideRefPreview(kind: RefPreviewKind): void {
@@ -1846,8 +1921,7 @@ function hideRefPreview(kind: RefPreviewKind): void {
   if (player) {
     player.audio.pause();
     stopRefLoop(kind);
-    player.audio.removeAttribute("src");
-    player.audio.load();
+    clearRefAudioSource(player);
     player.peaks = [];
     player.waveformPath = "";
     player.waveformLoading = false;
@@ -1926,6 +2000,182 @@ function initDropzones(): void {
   }, clearGallery);
 }
 
+function referenceExistsForContext(context: ReferenceRecordingContext): boolean {
+  if (context === "clone") return Boolean(cloneRefPath);
+  if (context === "finish") return Boolean(finishRefPath);
+  if (context === "gallery") return Boolean(selectedGalleryPersona()?.refPath);
+  const speakerId = context.startsWith("speaker:") ? context.slice("speaker:".length) : "";
+  return Boolean(multiSpeakers.find((speaker) => speaker.id === speakerId)?.refPath);
+}
+
+function removeReferenceForContext(context: ReferenceRecordingContext): void {
+  if (context === "clone") {
+    cloneRefPath = null;
+    clonePersonaId = "";
+    cloneRefName = "";
+    el<HTMLSelectElement>("#clone-persona-select").value = "";
+    clearDropzone("#clone-dropzone");
+    hideRefPreview("clone");
+  } else if (context === "finish") {
+    finishRefPath = null;
+    finishPersonaId = "";
+    finishRefName = "";
+    el<HTMLSelectElement>("#finish-persona-select").value = "";
+    clearDropzone("#finish-dropzone");
+    hideRefPreview("finish");
+  } else if (context === "gallery") {
+    const persona = selectedGalleryPersona();
+    if (!persona) return;
+    persona.refPath = "";
+    persona.refName = "";
+    persona.cachePath = "";
+    persona.updatedAt = Date.now();
+    saveSpeakerPersonas();
+    clearDropzone("#speaker-gallery-dropzone");
+    hideRefPreview("gallery");
+  } else {
+    const speakerId = context.slice("speaker:".length);
+    const speaker = multiSpeakers.find((item) => item.id === speakerId);
+    if (!speaker) return;
+    speaker.refPath = null;
+    speaker.refName = "";
+    speaker.personaId = "";
+    speaker.cachePath = "";
+    renderMultiSpeakers();
+  }
+  syncReferenceRecorderUi();
+}
+
+async function applyRecordedReference(
+  context: ReferenceRecordingContext,
+  result: RecordingResult,
+): Promise<void> {
+  const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const prepared = await prepareReferenceAudioFile(result.path, `Microphone ${stamp}.wav`);
+  if (context === "clone") {
+    cloneRefPath = prepared.path;
+    cloneRefName = prepared.name;
+    clonePersonaId = "";
+    el<HTMLSelectElement>("#clone-persona-select").value = "";
+    setDropzoneFile("#clone-dropzone", prepared.name);
+    showRefPreview("clone", prepared.path);
+  } else if (context === "finish") {
+    finishRefPath = prepared.path;
+    finishRefName = prepared.name;
+    finishPersonaId = "";
+    el<HTMLSelectElement>("#finish-persona-select").value = "";
+    setDropzoneFile("#finish-dropzone", prepared.name);
+    showRefPreview("finish", prepared.path);
+  } else if (context === "gallery") {
+    let persona = selectedGalleryPersona();
+    if (!persona) {
+      persona = createBlankPersona();
+      speakerPersonas.push(persona);
+      selectedGalleryPersonaId = persona.id;
+    }
+    const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
+    persona.refPath = stored.path;
+    persona.refName = prepared.name || stored.fileName;
+    persona.cachePath = "";
+    persona.updatedAt = Date.now();
+    saveSpeakerPersonas();
+    showRefPreview("gallery", persona.refPath);
+  } else {
+    const speakerId = context.slice("speaker:".length);
+    const speaker = multiSpeakers.find((item) => item.id === speakerId);
+    if (!speaker) throw new Error("That Multi Speaker voice no longer exists");
+    speaker.refPath = prepared.path;
+    speaker.refName = prepared.name;
+    speaker.personaId = "";
+    speaker.cachePath = "";
+    renderMultiSpeakers();
+  }
+  syncReferenceRecorderUi();
+}
+
+function referenceForTrim(context: ReferenceTrimContext): ReferenceTrimSource | null {
+  if (context === "clone") {
+    return cloneRefPath ? { path: cloneRefPath, name: cloneRefName || "Voice Clone reference" } : null;
+  }
+  if (context === "finish") {
+    return finishRefPath ? { path: finishRefPath, name: finishRefName || "Continue Speech reference" } : null;
+  }
+  if (context === "gallery") {
+    const persona = selectedGalleryPersona();
+    return persona?.refPath ? { path: persona.refPath, name: persona.refName || persona.name } : null;
+  }
+  if (context.startsWith("speaker:")) {
+    const speaker = multiSpeakers.find((item) => item.id === context.slice("speaker:".length));
+    return speaker?.refPath ? { path: speaker.refPath, name: speaker.refName || speaker.name } : null;
+  }
+  const line = multiLines.find((item) => item.id === context.slice("line:".length));
+  return line?.overridePath ? { path: line.overridePath, name: line.overrideName || "Line reference" } : null;
+}
+
+function trimmedReferenceName(source: ReferenceTrimSource, result: ReferenceTrimResult): string {
+  const base = source.name.replace(/\s+\(trimmed[^)]*\)$/i, "");
+  return `${base} (trimmed ${result.durationSeconds.toFixed(2)}s)`;
+}
+
+async function applyTrimmedReference(context: ReferenceTrimContext, result: ReferenceTrimResult): Promise<void> {
+  const source = referenceForTrim(context);
+  if (!source) throw new Error("Reference audio is no longer available");
+  const name = trimmedReferenceName(source, result);
+
+  if (context === "clone") {
+    cloneRefPath = result.path;
+    cloneRefName = name;
+    clonePersonaId = "";
+    el<HTMLSelectElement>("#clone-persona-select").value = "";
+    setDropzoneFile("#clone-dropzone", name);
+    showRefPreview("clone", result.path);
+  } else if (context === "finish") {
+    finishRefPath = result.path;
+    finishRefName = name;
+    finishPersonaId = "";
+    el<HTMLSelectElement>("#finish-persona-select").value = "";
+    setDropzoneFile("#finish-dropzone", name);
+    showRefPreview("finish", result.path);
+  } else if (context === "gallery") {
+    const persona = selectedGalleryPersona();
+    if (!persona) throw new Error("Select a Speaker Gallery identity first");
+    const stored = await storeSpeakerAsset(persona, result.path, "audio");
+    persona.refPath = stored.path;
+    persona.refName = name;
+    persona.cachePath = "";
+    persona.updatedAt = Date.now();
+    saveSpeakerPersonas();
+    showRefPreview("gallery", persona.refPath);
+  } else if (context.startsWith("speaker:")) {
+    const speaker = multiSpeakers.find((item) => item.id === context.slice("speaker:".length));
+    if (!speaker) throw new Error("Multi Speaker identity is no longer available");
+    speaker.refPath = result.path;
+    speaker.refName = name;
+    speaker.personaId = "";
+    speaker.cachePath = "";
+    renderMultiSpeakers();
+  } else {
+    const line = multiLines.find((item) => item.id === context.slice("line:".length));
+    if (!line) throw new Error("Speech line is no longer available");
+    line.overridePath = result.path;
+    line.overrideName = name;
+    renderMultiLines();
+  }
+  syncReferenceRecorderUi();
+}
+
+function initReferenceTrimButtons(): void {
+  const buttons: Array<[string, ReferenceTrimContext]> = [
+    ["#clone-ref-trim", "clone"],
+    ["#finish-ref-trim", "finish"],
+    ["#gallery-ref-trim", "gallery"],
+  ];
+  for (const [selector, context] of buttons) {
+    el(selector).addEventListener("click", () => openReferenceTrimmer(context));
+  }
+}
+
+
 async function setGalleryPhotoFromPath(imagePath: string): Promise<void> {
   let persona = selectedGalleryPersona();
   if (!persona) {
@@ -1970,7 +2220,7 @@ async function doAutoTranscribe(refPath: string | null, textareaId: string): Pro
 }
 
 async function transcribeAudioText(refPath: string): Promise<string | null> {
-  const whisperModelPath = localStorage.getItem("higgsAudio.whisperModel") || "";
+  const whisperModelPath = getStoredPath("higgsAudio.whisperModel");
   if (!whisperModelPath) {
     showToast("Select a whisper model in Settings first", "warning");
     return null;
@@ -1984,7 +2234,7 @@ async function transcribeAudioText(refPath: string): Promise<string | null> {
 }
 
 async function tryAutoTranscribeSilently(refPath: string): Promise<string> {
-  const whisperModelPath = localStorage.getItem("higgsAudio.whisperModel") || "";
+  const whisperModelPath = getStoredPath("higgsAudio.whisperModel");
   if (!whisperModelPath) return "";
   try {
     const result = await invoke<{ text: string }>("transcribe_audio", {
@@ -2000,7 +2250,7 @@ async function tryAutoTranscribeSilently(refPath: string): Promise<string> {
 
 async function pickAudioFile(): Promise<{ path: string; name: string } | null> {
   const selected = await open({
-    filters: [{ name: "Audio", extensions: ["wav", "mp3", "flac", "m4a", "ogg", "webm"] }],
+    filters: [{ name: "Audio", extensions: ["wav", "mp3", "flac", "m4a", "ogg", "opus", "webm"] }],
   });
   if (!selected) return null;
   const path = Array.isArray(selected) ? selected[0] : selected;
@@ -2040,7 +2290,7 @@ function cleanPersona(raw: any): SpeakerPersona | null {
   if (!raw || typeof raw !== "object") return null;
   const id = String(raw.id || "").trim() || nextId("persona");
   const name = String(raw.name || "Speaker").trim() || "Speaker";
-  const refPath = String(raw.refPath || raw.ref_path || "").trim();
+  const refPath = resolveStoredPath(String(raw.refPath || raw.ref_path || "").trim());
   return {
     id,
     name,
@@ -2048,8 +2298,8 @@ function cleanPersona(raw: any): SpeakerPersona | null {
     refName: String(raw.refName || raw.ref_name || (refPath ? refPath.split(/[/\\]/).pop() : "") || ""),
     refText: String(raw.refText || raw.ref_text || ""),
     notes: String(raw.notes || ""),
-    photoPath: String(raw.photoPath || raw.photo_path || ""),
-    cachePath: String(raw.cachePath || raw.cache_path || ""),
+    photoPath: resolveStoredPath(String(raw.photoPath || raw.photo_path || "")),
+    cachePath: resolveStoredPath(String(raw.cachePath || raw.cache_path || "")),
     normalize: Boolean(raw.normalize || raw.normalizeReference || raw.normalize_reference),
     createdAt: Number(raw.createdAt || raw.created_at || Date.now()),
     updatedAt: Number(raw.updatedAt || raw.updated_at || Date.now()),
@@ -2069,7 +2319,13 @@ function loadSpeakerPersonas(): void {
 }
 
 function persistSpeakerPersonas(): void {
-  localStorage.setItem(SPEAKER_PERSONA_STORAGE_KEY, JSON.stringify(speakerPersonas));
+  const stored = speakerPersonas.map((persona) => ({
+    ...persona,
+    refPath: storePortablePath(persona.refPath),
+    photoPath: storePortablePath(persona.photoPath),
+    cachePath: storePortablePath(persona.cachePath),
+  }));
+  localStorage.setItem(SPEAKER_PERSONA_STORAGE_KEY, JSON.stringify(stored));
 }
 
 function saveSpeakerPersonas(): void {
@@ -2727,7 +2983,7 @@ function multiDropzoneMarkup(fileName: string, emptyText: string): string {
   return `
     <div class="dropzone-empty">
       <p>⤒ ${emptyText}</p>
-      <p class="dropzone-hint">mp3 · wav · flac · m4a</p>
+      <p class="dropzone-hint">wav · mp3 · flac · m4a · ogg/opus · webm</p>
     </div>`;
 }
 
@@ -2760,6 +3016,10 @@ function renderMultiSpeakers(): void {
         <div class="dropzone mini-dropzone ${speaker.refName ? "has-file" : ""}" data-action="pick-speaker-audio">
           ${multiDropzoneMarkup(speaker.refName, "Drop reference voice, or click to browse")}
         </div>
+        ${referenceRecorderMarkup(`speaker:${speaker.id}`, true)}
+        <div class="reference-edit-actions">
+          <button class="compact-button" data-action="trim-speaker-audio" type="button" ${speaker.refPath ? "" : "disabled"}>Trim reference</button>
+        </div>
         <label class="field-label transcript-label">Reference transcript</label>
         <textarea class="text-area" data-field="speaker-transcript" rows="2" placeholder="Optional. Auto-filled with Whisper when available.">${escapeHtml(speaker.refText)}</textarea>
         <label class="inline-toggle reference-normalize-toggle">
@@ -2771,6 +3031,7 @@ function renderMultiSpeakers(): void {
       </div>`;
     list.appendChild(card);
   }
+  refreshReferenceRecorderUi();
 }
 
 function renderMultiLines(): void {
@@ -2793,6 +3054,9 @@ function renderMultiLines(): void {
       <div class="line-reference ${line.open ? "" : "hidden"}">
         <div class="dropzone mini-dropzone ${line.overrideName ? "has-file" : ""}" data-action="pick-line-audio">
           ${multiDropzoneMarkup(line.overrideName, "Optional line-specific reference voice")}
+        </div>
+        <div class="reference-edit-actions">
+          <button class="compact-button" data-action="trim-line-audio" type="button" ${line.overridePath ? "" : "disabled"}>Trim reference</button>
         </div>
         <div class="label-row">
           <label class="field-label">Reference transcript override</label>
@@ -3103,9 +3367,13 @@ function initMultiSpeakerWorkflow(): void {
         speaker.cachePath = "";
         renderMultiSpeakers();
       }
+    } else if (action === "trim-speaker-audio") {
+      openReferenceTrimmer(`speaker:${speaker.id}`);
     } else if (action === "clear-audio") {
       speaker.refPath = null;
       speaker.refName = "";
+      speaker.personaId = "";
+      speaker.cachePath = "";
       renderMultiSpeakers();
     } else if (action === "auto-speaker") {
       if (!speaker.refPath) {
@@ -3173,6 +3441,8 @@ function initMultiSpeakerWorkflow(): void {
         line.overrideName = file.name;
         renderMultiLines();
       }
+    } else if (action === "trim-line-audio") {
+      openReferenceTrimmer(`line:${line.id}`);
     } else if (action === "clear-audio") {
       line.overridePath = null;
       line.overrideName = "";
@@ -3692,7 +3962,10 @@ function generationStepForPhase(phase: string): number {
 
 function generationElapsedLabel(prefix = "Elapsed"): string {
   const elapsed = genStartedAt > 0 ? ((performance.now() - genStartedAt) / 1000).toFixed(1) : "0.0";
-  return `${prefix} ${elapsed}s`;
+  const tokens = generationTokenTotal > 1
+    ? ` · Tokens ${generationTokenCurrent} / ${generationTokenTotal}`
+    : "";
+  return `${prefix} ${elapsed}s${tokens}`;
 }
 
 function setGenerationElapsedLabel(prefix = generationProgressPrefix): void {
@@ -3705,6 +3978,8 @@ function beginGeneration(job: GenerationJob): void {
   cancelRequested = false;
   activeGenerationJob = job;
   generationProgressPrefix = "Elapsed";
+  generationTokenCurrent = 0;
+  generationTokenTotal = 0;
   genStartedAt = performance.now();
   el<HTMLElement>("#output-section").classList.toggle("hidden", !streamPlayback);
   if (streamPlayback) startLiveStreamPreview();
@@ -3808,6 +4083,8 @@ async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "
     const line = lines[i];
     setProgress("#gen-progress-bar", i, lines.length);
     const resolved = await resolveMultiLineReference(line, speakers, lines);
+    generationTokenCurrent = 0;
+    generationTokenTotal = 0;
     setGenerationElapsedLabel(`Line ${i + 1}/${lines.length} ·`);
     const perLineOptions: Record<string, number | string | boolean> = { ...lineOptions, normalize_reference: resolved.normalize };
     if (resolved.cachePath) perLineOptions.reference_cache_path = resolved.cachePath;
@@ -5069,6 +5346,10 @@ async function initEventListeners(): Promise<void> {
     if (p.total > 1) {
       bar.classList.remove("indeterminate");
       setProgress("#gen-progress-bar", p.current, p.total);
+      if (phase.includes("generate") || phase.includes("sample") || phase.includes("token") || phase.includes("decod")) {
+        generationTokenCurrent = Math.max(0, Math.min(p.current, p.total));
+        generationTokenTotal = p.total;
+      }
     } else {
       bar.classList.add("indeterminate");
     }
@@ -5141,6 +5422,7 @@ function initTextCounting(): void {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function main(): Promise<void> {
+  await initStorageLayout();
   clearApiLogsForFreshSession();
   initTooltips();
   initSettings();
@@ -5153,6 +5435,19 @@ async function main(): Promise<void> {
   initDropzones();
   initSpeakerPersonas();
   initMultiSpeakerWorkflow();
+  await initReferenceRecorder({
+    referenceExists: referenceExistsForContext,
+    removeReference: removeReferenceForContext,
+    applyRecording: applyRecordedReference,
+    showToast,
+  });
+  initReferenceTrimmer({
+    getReference: referenceForTrim,
+    applyTrim: applyTrimmedReference,
+    showToast,
+    maxSeconds: HIGGS_REFERENCE_MAX_SECONDS,
+  });
+  initReferenceTrimButtons();
   initTauriDropzones();
   initAdvancedOptions();
   initGenerate();
